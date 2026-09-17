@@ -11,7 +11,7 @@ from ..auth import User, current_user, verified_user
 from ..database import db, now
 from ..storage import MAX_FILE_SIZE, STORAGE
 from .models import ActionItem, Attachment, Note
-from .schemas import ActionItemInput, ActionItemOut, ActionItemPatch, AttachmentOut, NoteInput, NoteOut
+from .schemas import ActionItemInput, ActionItemOut, ActionItemPatch, AttachmentOut, NoteInput, NoteOut, NotePage
 
 router = APIRouter(prefix='/api/notes')
 action_items_router = APIRouter(prefix='/api/action-items')
@@ -34,15 +34,24 @@ def get_action_item(session, item_id, user):
     return item
 
 
-@router.get('', response_model=list[NoteOut])
-def notes(q: str = Query('', max_length=200), session: Session = Depends(db), user: User = Depends(current_user)):
-    query = select(Note).where(Note.owner_id == user.id).options(selectinload(Note.attachments))
+@router.get('', response_model=NotePage)
+def notes(
+    q: str = Query('', max_length=200),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    session: Session = Depends(db),
+    user: User = Depends(current_user),
+):
+    filters = [Note.owner_id == user.id]
+    order = (Note.meeting_date.desc(), Note.updated_at.desc(), Note.id.asc())
     if q.strip():
         search_vector = literal_column('notes.search_vector', postgresql.TSVECTOR())
         search_query = func.plainto_tsquery(literal_column("'pg_catalog.simple'::regconfig"), q.strip())
-        query = query.where(search_vector.op('@@')(search_query))
-        return session.scalars(query.order_by(func.ts_rank(search_vector, search_query).desc(), Note.meeting_date.desc(), Note.updated_at.desc(), Note.id.asc())).all()
-    return session.scalars(query.order_by(Note.meeting_date.desc(), Note.updated_at.desc())).all()
+        filters.append(search_vector.op('@@')(search_query))
+        order = (func.ts_rank(search_vector, search_query).desc(), *order)
+    total = session.scalar(select(func.count()).select_from(Note).where(*filters)) or 0
+    query = select(Note).where(*filters).options(selectinload(Note.attachments)).order_by(*order).offset(skip).limit(limit)
+    return {'items': session.scalars(query).all(), 'total': total}
 
 
 @router.post('', response_model=NoteOut, status_code=201)

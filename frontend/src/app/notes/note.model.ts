@@ -23,3 +23,8 @@ export interface Note {
     attachments: Attachment[];
     action_items: ActionItem[];
 }
+
+export interface NotePage {
+    items: Note[];
+    total: number;
+}

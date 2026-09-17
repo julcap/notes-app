@@ -1,5 +1,5 @@
 <div class="shell">
-    <nav-rail active="notes" [notesCount]="notes.length" (logoutClick)="logout()"></nav-rail>
+    <nav-rail active="notes" [notesCount]="total" (logoutClick)="logout()"></nav-rail>
     <main>
         <header>
             <div class="breadcrumb">Workspace <span>/</span> Meeting notes</div>
@@ -25,13 +25,13 @@
             <section class="note-list" aria-label="Meeting notes">
                 <div class="search-box"><span>⌕</span><input aria-label="Search notes"
                                                              placeholder="Search notes, people, anything…"
-                                                             [(ngModel)]="query">
-                    <button *ngIf="query" (click)="query=''" aria-label="Clear search">×</button>
+                                                             [(ngModel)]="query" (ngModelChange)="queueSearch($event)" [disabled]="busy">
+                    <button *ngIf="query" (click)="queueSearch('')" aria-label="Clear search" [disabled]="busy">×</button>
                 </div>
-                <div class="list-label">{{ query ? 'SEARCH RESULTS' : 'ALL NOTES' }} <span>{{ filtered.length }}</span>
+                <div class="list-label">{{ query ? 'SEARCH RESULTS' : 'ALL NOTES' }} <span>{{ total }}</span>
                 </div>
                 <div *ngIf="loading" class="empty-small">Loading your notes…</div>
-                <button *ngFor="let n of filtered" class="note-card" [class.active]="selected?.id===n.id"
+                <button *ngFor="let n of notes" class="note-card" [class.active]="selected?.id===n.id"
                         (click)="select(n)" [disabled]="busy">
                     <div class="card-date">{{ n.meeting_date | date:'MMM d, yyyy' }} <span *ngIf="n.attachments.length">↗ {{ n.attachments.length }}</span>
                     </div>
@@ -39,9 +39,11 @@
                     <p>{{ n.content || 'No notes yet.' }}</p>
                     <div class="card-people">{{ n.attendees || 'Just you' }}</div>
                 </button>
-                <div *ngIf="!loading && !filtered.length"
+                <div *ngIf="!loading && !notes.length"
                      class="empty-small">{{ query ? 'No matching notes. Try another search.' : 'A fresh page awaits. Create your first meeting note.' }}
                 </div>
+                <button *ngIf="notes.length" class="secondary load-more" (click)="loadMore()"
+                        [disabled]="busy || loading || !hasMore">{{ hasMore ? (loading ? 'Loading…' : 'Load more') : 'All notes loaded' }}</button>
             </section>
             <section class="editor" [attr.aria-label]="editing ? 'Edit note' : 'Note details'">
                 <ng-container *ngIf="editing; else reading">

@@ -68,3 +68,8 @@ class NoteOut(NoteInput):
     updated_at: datetime
     attachments: list[AttachmentOut]
     action_items: list[ActionItemOut]
+
+
+class NotePage(BaseModel):
+    items: list[NoteOut]
+    total: int

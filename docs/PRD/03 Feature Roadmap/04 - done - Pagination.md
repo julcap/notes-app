@@ -2,7 +2,18 @@
 
 2026-09-17 · split from `03 Feature Roadmap (Post-MVP).md`
 
-**Status:** Not started.
+**Status:** Code complete 2026-09-17; deployment pending.
+
+## Shipped implementation
+
+- `GET /api/notes` returns `{items, total}` and validates `skip >= 0` plus `1 <= limit <= 200`, with a default page size of 50.
+- Count and result queries share the owner and PostgreSQL full-text filters. Ranked and unfiltered results both use the note id as a stable final ordering key.
+- The notes workspace loads one page at a time, displays the server total, appends with **Load more**, and disables the control when the current result set is complete.
+- Search is server-backed, debounced by 300 ms, resets paging, and ignores stale responses after the query changes.
+- Create, update, and delete operations reload the first page so list contents and totals remain authoritative.
+- Backend coverage exercises validation boundaries, owner/search totals, and disjoint stable pages on PostgreSQL. Angular coverage exercises off-page search, query races, retry, completion state, and CRUD count refreshes.
+
+No production deployment or production data operation was performed as part of this implementation.
 
 ## Problem
 

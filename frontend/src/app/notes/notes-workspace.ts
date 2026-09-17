@@ -1,4 +1,4 @@
-import {Component, HostListener, inject, OnInit} from '@angular/core';
+import {Component, HostListener, inject, OnDestroy, OnInit} from '@angular/core';
 import {CommonModule} from '@angular/common';
 import {FormsModule} from '@angular/forms';
 import {HttpClient} from '@angular/common/http';
@@ -7,7 +7,7 @@ import {firstValueFrom} from 'rxjs';
 
 import {AuthService} from '../auth/auth.service';
 import {NavRail} from '../shell/nav-rail';
-import {ActionItem, Attachment, Note} from './note.model';
+import {ActionItem, Attachment, Note, NotePage} from './note.model';
 import {MarkdownEditor} from './markdown-editor';
 import {MarkdownRenderer} from './markdown-renderer';
 
@@ -17,11 +17,15 @@ import {MarkdownRenderer} from './markdown-renderer';
     imports: [CommonModule, FormsModule, RouterLink, NavRail, MarkdownEditor, MarkdownRenderer],
     templateUrl: './notes-workspace.html'
 })
-export class NotesWorkspace implements OnInit {
+export class NotesWorkspace implements OnInit, OnDestroy {
     private http = inject(HttpClient);
+    private requestVersion = 0;
+    private searchTimer?: ReturnType<typeof setTimeout>;
     auth = inject(AuthService);
 
     notes: Note[] = [];
+    total = 0;
+    readonly pageSize = 50;
     selected: Note | null = null;
     draft = this.blank();
     query = '';
@@ -80,9 +84,8 @@ export class NotesWorkspace implements OnInit {
         return {text: '', owner_name: '', due_date: ''};
     }
 
-    get filtered() {
-        const q = this.query.trim().toLowerCase();
-        return this.notes.filter(n => `${n.title} ${n.content} ${n.attendees}`.toLowerCase().includes(q));
+    get hasMore() {
+        return this.notes.length < this.total;
     }
 
     get dirty() {
@@ -101,26 +104,90 @@ export class NotesWorkspace implements OnInit {
         await this.load();
     }
 
-    async load() {
-        this.loading = true;
-        this.error = '';
-        try {
-            this.notes = await firstValueFrom(this.http.get<Note[]>('/api/notes'));
-            if (!this.selected && this.notes.length) this.select(this.notes[0]);
-        } catch {
-            this.error = 'Could not load your notes. Check the connection and try again.';
-        } finally {
-            this.loading = false;
+    ngOnDestroy() {
+        if (this.searchTimer) clearTimeout(this.searchTimer);
+    }
+
+    private invalidateListResponse() {
+        this.requestVersion++;
+        if (!this.searchTimer) this.loading = false;
+    }
+
+    private cancelListWork() {
+        this.requestVersion++;
+        this.loading = false;
+        if (this.searchTimer) {
+            clearTimeout(this.searchTimer);
+            this.searchTimer = undefined;
         }
     }
 
-    select(n: Note) {
-        if (this.busy || (this.dirty && !window.confirm('Discard unsaved changes?'))) return;
-        this.selected = n;
+    private async restoreListAfterMutation(operationError = '') {
+        await this.load();
+        if (operationError) this.error = operationError;
+    }
+
+    queueSearch(query: string) {
+        this.query = query;
+        this.requestVersion++;
+        if (this.searchTimer) clearTimeout(this.searchTimer);
+        this.loading = true;
+        this.searchTimer = setTimeout(() => {
+            this.searchTimer = undefined;
+            void this.load();
+        }, 300);
+    }
+
+    async load(reset = true) {
+        if (this.searchTimer) {
+            clearTimeout(this.searchTimer);
+            this.searchTimer = undefined;
+        }
+        const requestVersion = ++this.requestVersion;
+        const selectedId = this.selected?.id;
+        this.loading = true;
+        this.error = '';
+        try {
+            const page = await firstValueFrom(this.http.get<NotePage>('/api/notes', {
+                params: {q: this.query.trim(), skip: reset ? 0 : this.notes.length, limit: this.pageSize}
+            }));
+            if (requestVersion !== this.requestVersion) return false;
+            if (reset) {
+                this.notes = page.items;
+                if (!selectedId && !this.editing && this.notes.length) this.applySelection(this.notes[0]);
+            } else {
+                const existing = new Set(this.notes.map(note => note.id));
+                this.notes = [...this.notes, ...page.items.filter(note => !existing.has(note.id))];
+            }
+            this.total = page.total;
+            return true;
+        } catch {
+            if (requestVersion === this.requestVersion) {
+                this.error = 'Could not load your notes. Check the connection and try again.';
+            }
+            return false;
+        } finally {
+            if (requestVersion === this.requestVersion) this.loading = false;
+        }
+    }
+
+    async loadMore() {
+        if (this.busy || this.loading || !this.hasMore) return;
+        await this.load(false);
+    }
+
+    private applySelection(note: Note) {
+        this.selected = note;
         this.editing = false;
         this.confirmDelete = false;
         this.message = '';
         this.newActionItem = this.blankActionItem();
+    }
+
+    select(n: Note) {
+        if (this.busy || (this.dirty && !window.confirm('Discard unsaved changes?'))) return;
+        this.invalidateListResponse();
+        this.applySelection(n);
     }
 
     create() {
@@ -129,6 +196,7 @@ export class NotesWorkspace implements OnInit {
             return;
         }
         if (this.busy || (this.dirty && !window.confirm('Discard unsaved changes?'))) return;
+        this.invalidateListResponse();
         this.selected = null;
         this.draft = this.blank();
         this.editing = true;
@@ -151,35 +219,47 @@ export class NotesWorkspace implements OnInit {
 
     async save() {
         if (!this.draft.title.trim() || !this.draft.meeting_date || this.busy) return;
+        this.cancelListWork();
+        let operationError = '';
         this.busy = true;
         this.error = '';
         try {
             const n = await firstValueFrom(this.selected ? this.http.put<Note>('/api/notes/' + this.selected.id, this.draft) : this.http.post<Note>('/api/notes', this.draft));
-            this.notes = [n, ...this.notes.filter(x => x.id !== n.id)].sort((a, b) => b.meeting_date.localeCompare(a.meeting_date));
             this.selected = n;
             this.editing = false;
             this.message = 'All changes saved';
         } catch {
-            this.error = 'Your note could not be saved. Your draft is still here—please try again.';
+            operationError = 'Your note could not be saved. Your draft is still here—please try again.';
         } finally {
             this.busy = false;
         }
+        await this.load();
+        if (operationError) this.error = operationError;
     }
 
     async remove() {
         if (!this.selected || this.busy) return;
+        const noteId = this.selected.id;
+        this.cancelListWork();
+        let operationError = '';
         this.busy = true;
         try {
-            await firstValueFrom(this.http.delete('/api/notes/' + this.selected.id));
-            this.notes = this.notes.filter(n => n.id !== this.selected!.id);
-            this.selected = this.notes[0] || null;
-            this.confirmDelete = false;
-            this.message = 'Note deleted';
+            await firstValueFrom(this.http.delete('/api/notes/' + noteId));
         } catch {
-            this.error = 'Could not delete the note. Please try again.';
+            operationError = 'Could not delete the note. Please try again.';
         } finally {
             this.busy = false;
         }
+        if (!operationError) {
+            const wasVisible = this.notes.some(note => note.id === noteId);
+            this.notes = this.notes.filter(note => note.id !== noteId);
+            if (wasVisible) this.total = Math.max(0, this.total - 1);
+            this.selected = this.notes[0] || null;
+            this.confirmDelete = false;
+            this.message = 'Note deleted';
+        }
+        await this.load();
+        if (operationError) this.error = operationError;
     }
 
     async upload(event: Event) {
@@ -191,6 +271,8 @@ export class NotesWorkspace implements OnInit {
             input.value = '';
             return;
         }
+        this.cancelListWork();
+        let operationError = '';
         this.busy = true;
         this.error = '';
         const body = new FormData();
@@ -200,28 +282,34 @@ export class NotesWorkspace implements OnInit {
             this.selected.attachments.push(item);
             this.message = 'Attachment uploaded';
         } catch {
-            this.error = 'Upload failed. Please try again.';
+            operationError = 'Upload failed. Please try again.';
         } finally {
             this.busy = false;
             input.value = '';
         }
+        await this.restoreListAfterMutation(operationError);
     }
 
     async removeFile(a: Attachment) {
         if (!this.selected || !window.confirm(`Remove ${a.filename}?`)) return;
+        this.cancelListWork();
+        let operationError = '';
         this.busy = true;
         try {
             await firstValueFrom(this.http.delete(`/api/notes/${this.selected.id}/attachments/${a.id}`));
             this.selected.attachments = this.selected.attachments.filter(x => x.id !== a.id);
         } catch {
-            this.error = 'Could not remove attachment.';
+            operationError = 'Could not remove attachment.';
         } finally {
             this.busy = false;
         }
+        await this.restoreListAfterMutation(operationError);
     }
 
     async addActionItem() {
         if (!this.selected || !this.newActionItem.text.trim() || this.busy) return;
+        this.cancelListWork();
+        let operationError = '';
         this.busy = true;
         this.error = '';
         const body = {
@@ -234,36 +322,43 @@ export class NotesWorkspace implements OnInit {
             this.selected.action_items.push(item);
             this.newActionItem = this.blankActionItem();
         } catch {
-            this.error = 'Could not add the action item. Please try again.';
+            operationError = 'Could not add the action item. Please try again.';
         } finally {
             this.busy = false;
         }
+        await this.restoreListAfterMutation(operationError);
     }
 
     async toggleActionItem(item: ActionItem) {
         if (this.busy) return;
+        this.cancelListWork();
+        let operationError = '';
         this.busy = true;
         try {
             const updated = await firstValueFrom(this.http.patch<ActionItem>(`/api/action-items/${item.id}`, {done: !item.done}));
             item.done = updated.done;
         } catch {
-            this.error = 'Could not update the action item.';
+            operationError = 'Could not update the action item.';
         } finally {
             this.busy = false;
         }
+        await this.restoreListAfterMutation(operationError);
     }
 
     async removeActionItem(item: ActionItem) {
         if (!this.selected || this.busy) return;
+        this.cancelListWork();
+        let operationError = '';
         this.busy = true;
         try {
             await firstValueFrom(this.http.delete(`/api/action-items/${item.id}`));
             this.selected.action_items = this.selected.action_items.filter(x => x.id !== item.id);
         } catch {
-            this.error = 'Could not remove the action item.';
+            operationError = 'Could not remove the action item.';
         } finally {
             this.busy = false;
         }
+        await this.restoreListAfterMutation(operationError);
     }
 }
 

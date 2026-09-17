@@ -80,7 +80,7 @@ Browser → Angular served by Nginx → `/api` reverse proxy → FastAPI → Pos
 - `deploy/`: EKS manifests.
 - `.github/workflows/ci.yaml`: PR checks and main-branch deployment.
 
-Notes are plain text. File metadata is in PostgreSQL; file bytes are on a persistent volume. Each account has private notes and attachments. Email verification is required before creating notes. Access JWTs live in browser memory; refresh sessions use HttpOnly cookies. List/search loads all notes, appropriate for a small workspace; add pagination and PostgreSQL full-text indexing when the dataset grows. Concurrent edits currently use last-save-wins. Back up the database and file volume together. A crash between database commit and file deletion can leave unreferenced files; it cannot expose them through the API.
+Notes are Markdown-formatted text rendered through an allowlisted sanitizer. File metadata is in PostgreSQL; file bytes are on a persistent volume. Each account has private notes and attachments. Email verification is required before creating notes. Access JWTs live in browser memory; refresh sessions use HttpOnly cookies. List/search is server-backed with PostgreSQL full-text indexing, stable paginated results, totals, and a 50-note default page size. Concurrent edits currently use last-save-wins. Back up the database and file volume together. A crash between database commit and file deletion can leave unreferenced files; it cannot expose them through the API.
 
 ## EKS deployment
 

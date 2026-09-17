@@ -45,8 +45,8 @@ def test_private_notes_and_attachments(client):
     base='/api/notes/'+n['id']
     a=client.post(base+'/attachments',files={'file':('x.txt',b'private')}).json()
     signed_in(client,'other@example.com')
-    assert client.get('/api/notes').json()==[]
-    assert client.get('/api/notes?q=roadmap').json()==[]
+    assert client.get('/api/notes').json()=={'items': [], 'total': 0}
+    assert client.get('/api/notes?q=roadmap').json()=={'items': [], 'total': 0}
     for method,path,kw in [('get',base,{}),('put',base,{'json':NOTE}),('delete',base,{}),('get',base+'/attachments/'+a['id'],{}),('delete',base+'/attachments/'+a['id'],{}),('post',base+'/attachments',{'files':{'file':('x',b'x')}})]:
         assert getattr(client,method)(path,**kw).status_code==404
     client.headers.pop('Authorization')
