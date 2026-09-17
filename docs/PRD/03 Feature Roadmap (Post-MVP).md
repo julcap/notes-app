@@ -16,7 +16,7 @@ Roughly cheapest-and-most-impactful first, action items excepted since it's alre
 
 1. ✅ [Action items](./03%20Feature%20Roadmap/01%20-%20done%20-%20Action%20items.md) — shipped 2026-09-17. New `action_items` table, checklist UI under notes, lightweight PATCH to toggle done. (The other half of the original "richer notes" section — see item 2.)
 2. ✅ [Rich text notes: formatting](./03%20Feature%20Roadmap/02%20-%20done%20-%20Rich%20text%20notes%20formatting.md) — safe markdown toolbar, preview, and read rendering shipped 2026-09-17.
-3. ⬜ [Full-text search](./03%20Feature%20Roadmap/03%20Full-text%20search.md) — Postgres `tsvector`/GIN, backend-only.
+3. ✅ [Full-text search](./03%20Feature%20Roadmap/03%20-%20done%20-%20Full-text%20search.md) — weighted Postgres `tsvector`/GIN search shipped 2026-09-17; backend-only.
 4. ⬜ [Pagination](./03%20Feature%20Roadmap/04%20Pagination.md) — `skip`/`limit` through to the UI, small API shape change.
 5. ⬜ [Soft delete & undo](./03%20Feature%20Roadmap/05%20Soft%20delete%20and%20undo.md) — `deleted_at`, undo toast, scheduled purge.
 6. ⬜ [Attachment previews](./03%20Feature%20Roadmap/06%20Attachment%20previews.md) — inline preview for images/PDFs.

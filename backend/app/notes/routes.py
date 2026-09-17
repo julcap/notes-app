@@ -3,7 +3,8 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
-from sqlalchemy import or_, select
+from sqlalchemy import func, literal_column, select
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Session, selectinload
 
 from ..auth import User, current_user, verified_user
@@ -37,8 +38,10 @@ def get_action_item(session, item_id, user):
 def notes(q: str = Query('', max_length=200), session: Session = Depends(db), user: User = Depends(current_user)):
     query = select(Note).where(Note.owner_id == user.id).options(selectinload(Note.attachments))
     if q.strip():
-        term = '%' + q.strip().replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%'
-        query = query.where(or_(Note.title.ilike(term, escape='\\'), Note.content.ilike(term, escape='\\'), Note.attendees.ilike(term, escape='\\')))
+        search_vector = literal_column('notes.search_vector', postgresql.TSVECTOR())
+        search_query = func.plainto_tsquery(literal_column("'pg_catalog.simple'::regconfig"), q.strip())
+        query = query.where(search_vector.op('@@')(search_query))
+        return session.scalars(query.order_by(func.ts_rank(search_vector, search_query).desc(), Note.meeting_date.desc(), Note.updated_at.desc(), Note.id.asc())).all()
     return session.scalars(query.order_by(Note.meeting_date.desc(), Note.updated_at.desc())).all()
 
 

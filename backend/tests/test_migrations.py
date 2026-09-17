@@ -4,6 +4,8 @@ import subprocess
 import sys
 
 import pytest
+from alembic import command
+from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text
 
 from app.migrations import upgrade_database
@@ -23,6 +25,14 @@ def reset_database():
 def revision(database):
     with database.connect() as connection:
         return connection.execute(text('SELECT version_num FROM alembic_version')).scalar_one()
+
+
+def migration_config():
+    backend = Path(__file__).resolve().parents[1]
+    config = Config(str(backend / 'alembic.ini'))
+    config.set_main_option('script_location', str(backend / 'migrations'))
+    config.set_main_option('sqlalchemy.url', DATABASE_URL)
+    return config
 
 
 def test_empty_database_upgrade_creates_current_schema():
@@ -45,7 +55,7 @@ def test_empty_database_upgrade_creates_current_schema():
         'users',
     }
     assert {column['name']: column['nullable'] for column in schema.get_columns('notes')}['owner_id'] is False
-    assert revision(database) == '20260917_0001'
+    assert revision(database) == '20260917_0002'
     database.dispose()
 
 
@@ -86,7 +96,7 @@ def test_current_schema_adoption_preserves_populated_rows():
         assert connection.execute(text('SELECT title FROM notes')).scalar_one() == 'Kept note'
         assert connection.execute(text('SELECT filename FROM attachments')).scalar_one() == 'kept.txt'
         assert connection.execute(text('SELECT text FROM action_items')).scalar_one() == 'Keep this'
-    assert revision(database) == '20260917_0001'
+    assert revision(database) == '20260917_0002'
     database.dispose()
 
 
@@ -141,7 +151,7 @@ def test_known_ownerless_legacy_schema_is_migrated_without_claiming_notes():
                     INSERT INTO notes (id, owner_id, title, content, attendees, meeting_date, created_at, updated_at)
                     VALUES ('new-ownerless', NULL, 'Rejected', '', '', current_date, now(), now())
                 """))
-    assert revision(database) == '20260917_0001'
+    assert revision(database) == '20260917_0002'
     database.dispose()
 
 
@@ -165,7 +175,52 @@ def test_repeated_upgrade_is_a_no_op():
     upgrade_database(DATABASE_URL)
 
     database = create_engine(DATABASE_URL)
-    assert revision(database) == '20260917_0001'
+    assert revision(database) == '20260917_0002'
+    database.dispose()
+
+
+def test_full_text_search_migration_adds_weighted_generated_vector_and_gin_index():
+    reset_database()
+    upgrade_database(DATABASE_URL)
+    database = create_engine(DATABASE_URL)
+
+    with database.connect() as connection:
+        generated = connection.execute(text("""
+            SELECT pg_get_expr(definition.adbin, definition.adrelid)
+            FROM pg_attribute AS attribute
+            JOIN pg_attrdef AS definition
+              ON definition.adrelid = attribute.attrelid
+             AND definition.adnum = attribute.attnum
+            WHERE attribute.attrelid = 'notes'::regclass
+              AND attribute.attname = 'search_vector'
+              AND attribute.attgenerated = 's'
+        """)).scalar_one()
+        index_definition = connection.execute(text("""
+            SELECT indexdef
+            FROM pg_indexes
+            WHERE tablename = 'notes' AND indexname = 'ix_notes_search_vector'
+        """)).scalar_one()
+
+    assert "setweight(to_tsvector('simple'::regconfig, (COALESCE(title, ''::character varying))::text), 'A'::\"char\")" in generated
+    assert "setweight(to_tsvector('simple'::regconfig, (COALESCE(attendees, ''::character varying))::text), 'B'::\"char\")" in generated
+    assert "setweight(to_tsvector('simple'::regconfig, COALESCE(content, ''::text)), 'C'::\"char\")" in generated
+    assert 'USING gin (search_vector)' in index_definition
+    database.dispose()
+
+
+def test_full_text_search_migration_downgrade_and_upgrade_round_trip():
+    reset_database()
+    upgrade_database(DATABASE_URL)
+    database = create_engine(DATABASE_URL)
+
+    command.downgrade(migration_config(), '20260917_0001')
+    assert 'search_vector' not in {column['name'] for column in inspect(database).get_columns('notes')}
+    assert 'ix_notes_search_vector' not in {index['name'] for index in inspect(database).get_indexes('notes')}
+
+    command.upgrade(migration_config(), 'head')
+    assert 'search_vector' in {column['name'] for column in inspect(database).get_columns('notes')}
+    assert 'ix_notes_search_vector' in {index['name'] for index in inspect(database).get_indexes('notes')}
+    assert revision(database) == '20260917_0002'
     database.dispose()
 
 
@@ -189,6 +244,6 @@ def test_concurrent_upgrade_is_serialized():
     assert [process.returncode for process in processes] == [0, 0]
     assert all('Traceback' not in stderr for _, stderr in results)
     database = create_engine(DATABASE_URL)
-    assert revision(database) == '20260917_0001'
+    assert revision(database) == '20260917_0002'
     assert 'notes' in inspect(database).get_table_names()
     database.dispose()

@@ -2,7 +2,7 @@
 
 2026-09-17 · split from `03 Feature Roadmap (Post-MVP).md`
 
-**Status:** Not started. Backend-only — no frontend or contract impact.
+**Status:** Code complete 2026-09-17. Backend-only — no frontend or contract impact. Production activation follows the normal Alembic migration during deployment.
 
 ## Problem
 
@@ -12,22 +12,22 @@ The current search is `ILIKE '%term%'` across title/content/attendees (`backend/
 
 - Move to Postgres's built-in full-text search: a `tsvector` column (generated from title + content + attendees), a GIN index on it, and queries via `tsquery` / `plainto_tsquery`.
 - Rank results with `ts_rank` instead of returning them in whatever order the date sort happens to produce.
-- Same API shape (`?search=` / the existing `q` query param) — this must stay a backend-only change.
+- Keep the existing `GET /api/notes?q=` API and bare-array response shape — this stays a backend-only change.
 
 ## Data model
 
-- Add a generated `search_vector` (`tsvector`) column to `notes`, built from `title`, `content`, `attendees` (e.g. via a Postgres `GENERATED ALWAYS AS` expression, or a trigger if weighting per-field matters).
+- Add a generated `search_vector` (`tsvector`) column to `notes`, weighted title A, attendees B, and content C with the explicit immutable `pg_catalog.simple` text-search configuration.
 - Add a GIN index on `search_vector`.
-- Apply via the same idempotent-migration pattern already used in `backend/app/init_db.py` (`ALTER TABLE ... ADD COLUMN IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`).
+- Apply through Alembic revision `20260917_0002`, after the current-schema baseline.
 
 ## Backend
 
-- Replace the `ilike`/`or_` clause in `notes()` (`backend/app/notes/routes.py`) with a `tsquery` match against `search_vector`, ordered by `ts_rank(search_vector, query)` (falling back to the current date sort when there's no search term).
+- Replace the `ilike`/`or_` clause in `notes()` (`backend/app/notes/routes.py`) with a `plainto_tsquery('simple', q)` match against `search_vector`, ordered by rank, meeting date, update time, and id (falling back to the current date sort when there's no search term).
 - Keep escaping/validation as strict as today — `plainto_tsquery` handles user input safely without needing the manual `%`/`_` escaping the ILIKE path uses.
 
 ## Tests
 
-- Extend `backend/tests/test_api.py::test_crud_search_and_validation` (or add a new test) to check: ranking order when multiple notes match with different relevance, and that the existing exact-match assertions (`LAUNCH`, `Alex`) still pass under the new query.
+- PostgreSQL integration coverage verifies the generated vector and GIN index, weighted ranking, stable ties, uppercase and attendee matches, punctuation and SQL-like input, updated content, query limits, and owner isolation.
 
 ## Out of scope
 
