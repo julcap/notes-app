@@ -1,0 +1,48 @@
+services:
+  database:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: minutes
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-minutes-local-only}
+      POSTGRES_DB: minutes
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U minutes"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+  backend:
+    build: ./backend
+    environment:
+      DATABASE_URL: postgresql+psycopg://minutes:${POSTGRES_PASSWORD:-minutes-local-only}@database:5432/minutes
+      UPLOAD_DIR: /data/uploads
+      AUTH_SECRET: ${AUTH_SECRET:?Set AUTH_SECRET in .env to a random 32+ character value}
+      APP_URL: http://localhost:8080
+      COOKIE_SECURE: 'false'
+      MAIL_MODE: smtp
+      SMTP_HOST: mailpit
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      FACEBOOK_CLIENT_ID: ${FACEBOOK_CLIENT_ID:-}
+      FACEBOOK_CLIENT_SECRET: ${FACEBOOK_CLIENT_SECRET:-}
+      AMAZON_CLIENT_ID: ${AMAZON_CLIENT_ID:-}
+      AMAZON_CLIENT_SECRET: ${AMAZON_CLIENT_SECRET:-}
+    volumes:
+      - uploads:/data/uploads
+    depends_on:
+      database:
+        condition: service_healthy
+  mailpit:
+    image: axllent/mailpit:v1.27
+    ports:
+      - "127.0.0.1:8025:8025"
+  frontend:
+    build: ./frontend
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      - backend
+volumes:
+  postgres-data:
+  uploads:

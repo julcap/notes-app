@@ -1,0 +1,27 @@
+services:
+  test-database:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: minutes_test
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test -d minutes_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+  tests:
+    build: ./backend
+    user: root
+    environment:
+      AUTH_SECRET: test-only-secret-with-at-least-32-characters
+      APP_URL: http://localhost:8080
+      COOKIE_SECURE: 'false'
+      MAIL_MODE: smtp
+      DATABASE_URL: postgresql+psycopg://test:test@test-database:5432/minutes_test
+    volumes:
+      - ./backend/tests:/app/tests:ro
+    command: ["python", "-m", "pytest", "-q", "tests"]
+    depends_on:
+      test-database:
+        condition: service_healthy

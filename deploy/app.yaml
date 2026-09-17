@@ -1,0 +1,116 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: uploads
+  namespace: minutes
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: gp3
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: minutes
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: {app: backend}
+  template:
+    metadata:
+      labels: {app: backend}
+    spec:
+      serviceAccountName: minutes-backend
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+      containers:
+        - name: backend
+          image: ${BACKEND_IMAGE}
+          ports: [{containerPort: 8000}]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: {name: minutes-secrets, key: database-url}
+            - name: UPLOAD_DIR
+              value: /data/uploads
+            - name: AUTH_SECRET
+              valueFrom:
+                secretKeyRef: {name: minutes-secrets, key: auth-secret}
+            - name: APP_URL
+              value: https://${APP_DOMAIN}
+            - name: COOKIE_SECURE
+              value: 'true'
+            - name: MAIL_MODE
+              value: ses
+            - name: SES_FROM_EMAIL
+              value: ${SES_FROM_EMAIL}
+            - name: AWS_REGION
+              value: ${AWS_REGION}
+          envFrom:
+            - secretRef:
+                name: minutes-oauth
+                optional: true
+          volumeMounts: [{name: uploads, mountPath: /data/uploads}]
+          readinessProbe:
+            httpGet: {path: /api/health, port: 8000}
+            initialDelaySeconds: 5
+          livenessProbe:
+            tcpSocket: {port: 8000}
+            initialDelaySeconds: 20
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: '1', memory: 512Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+      volumes:
+        - name: uploads
+          persistentVolumeClaim: {claimName: uploads}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: backend, namespace: minutes}
+spec:
+  selector: {app: backend}
+  ports: [{port: 8000, targetPort: 8000}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: frontend, namespace: minutes}
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: frontend}
+  template:
+    metadata:
+      labels: {app: frontend}
+    spec:
+      securityContext: {runAsNonRoot: true, runAsUser: 101}
+      containers:
+        - name: frontend
+          image: ${FRONTEND_IMAGE}
+          ports: [{containerPort: 8080}]
+          readinessProbe:
+            httpGet: {path: /healthz, port: 8080}
+          livenessProbe:
+            httpGet: {path: /healthz, port: 8080}
+          resources:
+            requests: {cpu: 50m, memory: 32Mi}
+            limits: {cpu: 500m, memory: 128Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: frontend, namespace: minutes}
+spec:
+  selector: {app: frontend}
+  ports: [{port: 80, targetPort: 8080}]

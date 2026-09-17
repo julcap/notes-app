@@ -1,0 +1,72 @@
+name: Test, build, and deploy
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: minutes-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci && npm run build
+        working-directory: frontend
+      - run: docker compose -f compose.test.yaml up --build --abort-on-container-exit --exit-code-from tests
+      - if: always()
+        run: docker compose -f compose.test.yaml down -v
+  deploy:
+    if: github.event_name == 'push' && vars.DEPLOY_ENABLED == 'true'
+    needs: test
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      EKS_CLUSTER: ${{ vars.EKS_CLUSTER }}
+      APP_DOMAIN: ${{ vars.APP_DOMAIN }}
+      SES_FROM_EMAIL: ${{ vars.SES_FROM_EMAIL }}
+      SES_ROLE_ARN: ${{ vars.SES_ROLE_ARN }}
+      ACM_CERTIFICATE_ARN: ${{ vars.ACM_CERTIFICATE_ARN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - uses: aws-actions/amazon-ecr-login@v2
+        id: ecr
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: backend
+          push: true
+          tags: ${{ steps.ecr.outputs.registry }}/minutes-backend:${{ github.sha }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: frontend
+          push: true
+          tags: ${{ steps.ecr.outputs.registry }}/minutes-frontend:${{ github.sha }}
+      - uses: azure/setup-kubectl@v4
+      - name: Deploy immutable images
+        env:
+          BACKEND_IMAGE: ${{ steps.ecr.outputs.registry }}/minutes-backend:${{ github.sha }}
+          FRONTEND_IMAGE: ${{ steps.ecr.outputs.registry }}/minutes-frontend:${{ github.sha }}
+        run: |
+          aws eks update-kubeconfig --name "$EKS_CLUSTER" --region "$AWS_REGION"
+          kubectl apply -f deploy/namespace.yaml
+          envsubst < deploy/service-account.yaml | kubectl apply -f -
+          envsubst < deploy/app.yaml | kubectl apply -f -
+          envsubst < deploy/ingress.yaml | kubectl apply -f -
+          kubectl -n minutes rollout status deployment/backend --timeout=180s
+          kubectl -n minutes rollout status deployment/frontend --timeout=180s
