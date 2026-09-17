@@ -1,15 +1,9 @@
 import {Injectable, inject} from '@angular/core';
-import {HttpBackend, HttpClient, HttpErrorResponse, HttpInterceptorFn} from '@angular/common/http';
-import {BehaviorSubject, catchError, firstValueFrom, from, switchMap, throwError} from 'rxjs';
-import {CanActivateFn, Router} from '@angular/router';
+import {HttpBackend, HttpClient, HttpErrorResponse} from '@angular/common/http';
+import {BehaviorSubject, firstValueFrom} from 'rxjs';
+import {Router} from '@angular/router';
 
-export interface User {
-    id: number;
-    email: string;
-    display_name: string;
-    email_verified: boolean;
-    auth_provider: string;
-}
+import {User} from './user.model';
 
 interface Session {
     access_token: string;
@@ -78,25 +72,3 @@ export class AuthService {
         this.subject.next(await firstValueFrom(this.raw.get<User>('/api/auth/me', {headers: {Authorization: 'Bearer ' + this.token}})));
     }
 }
-
-export const authGuard: CanActivateFn = async () => {
-    const auth = inject(AuthService);
-    const router = inject(Router);
-    return await auth.ensure() || router.createUrlTree(['/login']);
-};
-export const authInterceptor: HttpInterceptorFn = (req, next) => {
-    const auth = inject(AuthService);
-    const router = inject(Router);
-    if (!req.url.startsWith('/api/notes')) return next(req);
-    const authorized = req.clone({setHeaders: {Authorization: 'Bearer ' + auth.token}});
-    return next(authorized).pipe(catchError(error => {
-        if (error.status !== 401) return throwError(() => error);
-        return from(auth.refresh()).pipe(switchMap(ok => {
-            if (!ok) {
-                void router.navigateByUrl('/login');
-                return throwError(() => error);
-            }
-            return next(req.clone({setHeaders: {Authorization: 'Bearer ' + auth.token}}));
-        }));
-    }));
-};

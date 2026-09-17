@@ -64,8 +64,10 @@ Tests use a separate disposable PostgreSQL database. They cover note CRUD, valid
 
 Browser → Angular served by Nginx → `/api` reverse proxy → FastAPI → PostgreSQL and an upload volume.
 
-- `frontend/src/main.ts`: standalone Angular component and API interaction.
-- `frontend/src/app.html`, `styles.css`: responsive workspace UI.
+- `frontend/src/main.ts`: bootstraps the standalone root component with `app.config.ts` (providers) and `app.routes.ts` (routes).
+- `frontend/src/app/auth/`: `auth.service.ts` (session state), `auth.guard.ts`, `auth.interceptor.ts`, `user.model.ts`, and `auth-page/` (login/register/forgot/reset/verify — one parametrized page component driven by route `data.mode`).
+- `frontend/src/app/notes/`: `notes-workspace.ts`/`.html` (the meeting-notes UI) and `note.model.ts`.
+- `frontend/src/styles.css`: shared responsive styling.
 - `backend/app/main.py`: FastAPI app wiring (middleware, routers, health check).
 - `backend/app/database.py`: SQLAlchemy engine, session factory, declarative base.
 - `backend/app/auth/`: accounts, sessions and email — `models.py`/`schemas.py` (data), `security.py` (hashing, rate limiting, origin checks), `tokens.py` (JWTs, cookies, dependencies), `email.py` (SES/SMTP delivery), `routes.py` (register/login/reset/verify), `oauth.py` (Google/Facebook/Amazon).

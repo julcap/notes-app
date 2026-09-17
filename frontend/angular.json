@@ -13,8 +13,9 @@
             "tsConfig": "tsconfig.json",
             "index": "src/index.html",
             "styles": [
-              "src/styles.css"
+              "src/styles.scss"
             ],
+            "inlineStyleLanguage": "scss",
             "outputPath": "dist/minutes",
             "polyfills": [
               "zone.js"

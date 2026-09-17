@@ -4,13 +4,14 @@ import {FormsModule} from '@angular/forms';
 import {ActivatedRoute, Router, RouterLink} from '@angular/router';
 import {HttpClient, HttpErrorResponse} from '@angular/common/http';
 import {firstValueFrom} from 'rxjs';
-import {AuthService} from './auth.service';
+
+import {AuthService} from '../auth.service';
 
 @Component({
     selector: 'auth-page',
     standalone: true,
     imports: [CommonModule, FormsModule, RouterLink],
-    templateUrl: './auth.html'
+    templateUrl: './auth-page.html'
 })
 export class AuthPage implements OnInit {
     auth = inject(AuthService);
