@@ -2,7 +2,7 @@
 
 2026-09-17 · split from `04 Production Readiness Gaps.md`
 
-**Status: not done.** Correction to the original doc: it claimed "the Alembic scaffold exists in the repo but nothing actually uses it" — there is no Alembic anywhere in this repo today, scaffolded or otherwise. Schema changes ship as code-only model changes plus hand-written idempotent SQL.
+**Status: code-complete.** Alembic now owns the schema history. Runtime startup no longer calls `create_all()` or carries an open-ended list of manual `ALTER TABLE` statements.
 
 ## Problem
 
@@ -18,3 +18,14 @@
 ## Migration path
 
 This can be introduced without a flag day: generate the initial revision against the *current* production schema (via `alembic revision --autogenerate` pointed at a real database), verify it's a no-op against production, then switch new changes over to Alembic from that point forward.
+
+## Implemented
+
+- `20260917_0001` creates the full current schema on an empty database.
+- An unversioned current schema is inspected before adoption; unknown tables, columns, missing keys, or missing indexes are rejected instead of blindly stamped.
+- The known pre-auth `notes`/`attachments` shape is upgraded in-place. Ownerless notes and their attachments remain intact and inaccessible, while a `NOT VALID` ownership check rejects new ownerless writes.
+- The migration environment retains the PostgreSQL advisory transaction lock, so concurrent startup processes serialize safely. Re-running `upgrade head` is a no-op.
+- Local Compose and the isolated test service migrate before startup. EKS uses a backend-image init container, so migrations finish before the API serves traffic.
+- Tests use a real isolated PostgreSQL server and cover empty, current populated, known legacy, unknown drift, repeated, and concurrent upgrade paths.
+
+No production migration or deployment was performed as part of this code change.

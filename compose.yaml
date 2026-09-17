@@ -30,6 +30,7 @@ services:
       AMAZON_CLIENT_SECRET: ${AMAZON_CLIENT_SECRET:-}
     volumes:
       - uploads:/data/uploads
+    command: ["sh", "-c", "python -m app.init_db && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --no-access-log"]
     depends_on:
       database:
         condition: service_healthy

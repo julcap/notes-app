@@ -14,7 +14,7 @@
 
 - `test_api.py`: CRUD + search + validation, attachment upload/download/cascade/size-limit, action-item CRUD and cross-note/cross-user ownership isolation.
 - `test_auth.py`: registration + single-use verification, password policy + duplicate email rejection, per-user note/attachment privacy, refresh rotation + CSRF + logout, password reset (generic response, single-use, session revocation), expired-token handling, rate limits, "remember me" cookie lifetime, social-account merge/unverified-separation/mailbox-proof-before-linking, OAuth state rejection, resend-verification, TOTP login + backup codes, TOTP disable requiring password-or-code, email change flow, password change, account-deletion cascade.
-- Both use a real Postgres instance (`compose.test.yaml`'s `test-database` service), not mocks — the fixture in `tests/conftest.py` drops/recreates the schema per test via `Base.metadata.create_all`.
+- Both use a real Postgres instance (`compose.test.yaml`'s `test-database` service), not mocks. The service runs Alembic before pytest, and fixtures clear table rows between tests without bypassing migration history.
 
 ## Enforcement
 

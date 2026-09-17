@@ -3,19 +3,27 @@ import tempfile
 os.environ['UPLOAD_DIR']=tempfile.mkdtemp()
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import delete
 from app.main import app, Base, engine
+from app.migrations import upgrade_database
 from app import auth
 HEADERS={'origin':'http://localhost:8080','x-requested-with':'Minutes'}
+
+def clear_database():
+    with engine.begin() as connection:
+        for table in reversed(Base.metadata.sorted_tables):
+            connection.execute(delete(table))
+
 @pytest.fixture
 def raw(monkeypatch):
-    Base.metadata.drop_all(engine)
-    Base.metadata.create_all(engine)
+    upgrade_database()
+    clear_database()
     messages=[]
     monkeypatch.setattr(auth.email,'send_email',lambda recipient,subject,body:messages.append((recipient,subject,body)))
     with TestClient(app,headers=HEADERS) as c:
         c.messages=messages
         yield c
-    Base.metadata.drop_all(engine)
+    clear_database()
 
 def register(c,email='test@example.com',remember=False):
     r=c.post('/api/auth/register',json={'email':email,'password':'SafePassword123','password_confirmation':'SafePassword123','remember':remember})
