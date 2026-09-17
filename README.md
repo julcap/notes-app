@@ -58,7 +58,7 @@ npm ci
 npm run build
 ```
 
-Tests use a separate disposable PostgreSQL database. They cover note CRUD, validation, case-insensitive search, literal wildcard searches, file round trips, note/file association, size limits, and deletion cleanup. Do not run the Python tests with a production DATABASE_URL: the fixture resets its schema.
+Tests use a separate disposable PostgreSQL database. The test container upgrades it through Alembic before pytest; fixtures clear rows between tests without recreating schema. Migration coverage includes empty installs, validated adoption of populated current installs, ownerless pre-auth data preservation, drift rejection, repeated upgrades, and concurrent startup. Never point either the migration tests or the full Python suite at production.
 
 ## Architecture
 
@@ -75,7 +75,7 @@ Browser → Angular served by Nginx → `/api` reverse proxy → FastAPI → Pos
 - `backend/app/storage.py`: shared attachment-storage path/size-limit constants used by both `notes/routes.py` and account deletion.
 - `backend/app/auth/`: accounts, sessions and email — `models.py`/`schemas.py` (data), `security.py` (hashing, rate limiting, origin checks), `tokens.py` (JWTs, cookies, dependencies, MFA challenges), `email.py` (SES/SMTP delivery), `totp.py` (TOTP secrets, QR codes, backup codes), `routes.py` (register/login/reset/verify/account management/2FA), `oauth.py` (Google/Facebook/Amazon).
 - `backend/app/notes/`: meeting notes and attachments — `models.py`/`schemas.py` (data), `routes.py` (CRUD + file upload/download).
-- `backend/app/init_db.py`: initial additive schema bootstrap. Future schema changes need versioned migrations; `create_all` does not migrate existing tables.
+- `backend/app/migrations.py` and `backend/migrations/`: the Alembic upgrade entrypoint and immutable schema revisions. Every schema change must add a revision; `app.init_db` only runs `upgrade head`.
 - `compose.yaml`: local application stack; only the frontend is published, on localhost.
 - `deploy/`: EKS manifests.
 - `.github/workflows/ci.yaml`: PR checks and main-branch deployment.

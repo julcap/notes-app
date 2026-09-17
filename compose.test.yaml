@@ -21,7 +21,7 @@ services:
       DATABASE_URL: postgresql+psycopg://test:test@test-database:5432/minutes_test
     volumes:
       - ./backend/tests:/app/tests:ro
-    command: ["python", "-m", "pytest", "-q", "tests"]
+    command: ["sh", "-c", "python -m app.init_db && python -m pytest -q tests"]
     depends_on:
       test-database:
         condition: service_healthy

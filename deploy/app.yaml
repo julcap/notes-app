@@ -30,6 +30,24 @@ spec:
         runAsNonRoot: true
         runAsUser: 10001
         fsGroup: 10001
+      initContainers:
+        - name: database-migrations
+          image: ${BACKEND_IMAGE}
+          command: ["python", "-m", "app.init_db"]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: {name: minutes-secrets, key: database-url}
+            - name: AUTH_SECRET
+              valueFrom:
+                secretKeyRef: {name: minutes-secrets, key: auth-secret}
+            - name: APP_URL
+              value: https://${APP_DOMAIN}
+            - name: COOKIE_SECURE
+              value: 'true'
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
       containers:
         - name: backend
           image: ${BACKEND_IMAGE}
