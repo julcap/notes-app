@@ -65,12 +65,15 @@ Tests use a separate disposable PostgreSQL database. They cover note CRUD, valid
 Browser → Angular served by Nginx → `/api` reverse proxy → FastAPI → PostgreSQL and an upload volume.
 
 - `frontend/src/main.ts`: bootstraps the standalone root component with `app.config.ts` (providers) and `app.routes.ts` (routes).
-- `frontend/src/app/auth/`: `auth.service.ts` (session state), `auth.guard.ts`, `auth.interceptor.ts`, `user.model.ts`, and `auth-page/` (login/register/forgot/reset/verify — one parametrized page component driven by route `data.mode`).
+- `frontend/src/app/auth/`: `auth.service.ts` (session state), `auth.guard.ts`, `auth.interceptor.ts`, `user.model.ts`, `error-text.ts`/`password-policy.ts` (small shared helpers), and `auth-page/` (login/register/forgot/reset/verify/login-2fa — one parametrized page component driven by route `data.mode`, plus an inline 2FA-code step when a login response asks for one).
+- `frontend/src/app/account/`: `account.ts`/`.html` — the signed-in Account page (profile, password, 2FA enrollment/disable, delete account).
+- `frontend/src/app/shell/`: `nav-rail.ts`/`.html` — the sidebar navigation shared by the notes workspace and the Account page.
 - `frontend/src/app/notes/`: `notes-workspace.ts`/`.html` (the meeting-notes UI) and `note.model.ts`.
 - `frontend/src/styles.css`: shared responsive styling.
 - `backend/app/main.py`: FastAPI app wiring (middleware, routers, health check).
 - `backend/app/database.py`: SQLAlchemy engine, session factory, declarative base.
-- `backend/app/auth/`: accounts, sessions and email — `models.py`/`schemas.py` (data), `security.py` (hashing, rate limiting, origin checks), `tokens.py` (JWTs, cookies, dependencies), `email.py` (SES/SMTP delivery), `routes.py` (register/login/reset/verify), `oauth.py` (Google/Facebook/Amazon).
+- `backend/app/storage.py`: shared attachment-storage path/size-limit constants used by both `notes/routes.py` and account deletion.
+- `backend/app/auth/`: accounts, sessions and email — `models.py`/`schemas.py` (data), `security.py` (hashing, rate limiting, origin checks), `tokens.py` (JWTs, cookies, dependencies, MFA challenges), `email.py` (SES/SMTP delivery), `totp.py` (TOTP secrets, QR codes, backup codes), `routes.py` (register/login/reset/verify/account management/2FA), `oauth.py` (Google/Facebook/Amazon).
 - `backend/app/notes/`: meeting notes and attachments — `models.py`/`schemas.py` (data), `routes.py` (CRUD + file upload/download).
 - `backend/app/init_db.py`: initial additive schema bootstrap. Future schema changes need versioned migrations; `create_all` does not migrate existing tables.
 - `compose.yaml`: local application stack; only the frontend is published, on localhost.

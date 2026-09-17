@@ -1,0 +1,14 @@
+<aside class="rail">
+    <a class="brand" routerLink="/" aria-label="Minutes home"><span class="brand-icon">m.</span> minutes<span
+            class="brand-dot">.</span></a>
+    <div class="workspace">WORKSPACE</div>
+    <a class="nav-link" [class.nav-active]="active==='notes'" routerLink="/"><span>▤</span> Meeting notes
+        <span class="count" *ngIf="notesCount!==null">{{ notesCount }}</span></a>
+    <a class="nav-link" [class.nav-active]="active==='account'" routerLink="/account"><span>⚙</span> Account</a>
+    <div class="rail-bottom">
+        <div class="avatar">{{ (auth.user?.display_name || auth.user?.email || '?').charAt(0) | uppercase }}</div>
+        <div>{{ auth.user?.display_name || auth.user?.email }}<small>
+            <button (click)="logoutClick.emit()">Log out</button>
+        </small></div>
+    </div>
+</aside>

@@ -13,7 +13,7 @@ from .models import Identity, User
 from .router import router
 from .schemas import EmailInput
 from .security import limit
-from .tokens import issue
+from .tokens import issue, mfa_challenge
 
 # Authlib validates state and Google's OIDC signature, issuer, audience, and nonce.
 oauth = OAuth()
@@ -77,8 +77,11 @@ async def social_callback(provider: str, request: Request, tasks: BackgroundTask
             verified = False
         email = str(EmailInput(email=info['email']).email)
         user = social_user(session, provider, str(subject), email, info.get('name', ''), verified, tasks)
+        remember = bool(request.session.pop('remember', False))
+        if user.totp_enabled:
+            return RedirectResponse(APP_URL + f'/login-2fa#token={mfa_challenge(user, remember)}', status_code=303)
         response = RedirectResponse(APP_URL + '/auth/callback', status_code=303)
-        issue(user, response, session, bool(request.session.pop('remember', False)))
+        issue(user, response, session, remember)
         return response
     except Exception:
         session.rollback()

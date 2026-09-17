@@ -34,10 +34,15 @@ export class AuthService {
         this.subject.next(session.user);
     }
 
-    async action(path: string, data: object = {}) {
-        const value = await firstValueFrom(this.raw.post<any>('/api/auth/' + path, data, {headers: {...this.headers(), ...(this.token ? {Authorization: 'Bearer ' + this.token} : {})}}));
-        if (value.access_token) this.accept(value);
+    async call(method: string, path: string, data: object = {}) {
+        const headers = {...this.headers(), ...(this.token ? {Authorization: 'Bearer ' + this.token} : {})};
+        const value = await firstValueFrom(this.raw.request<any>(method, '/api/auth/' + path, {body: data, headers}));
+        if (value?.access_token) this.accept(value);
         return value;
+    }
+
+    async action(path: string, data: object = {}) {
+        return this.call('POST', path, data);
     }
 
     refresh(): Promise<boolean> {

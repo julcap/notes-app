@@ -1,4 +1,3 @@
-import os
 import uuid
 from pathlib import Path
 
@@ -9,11 +8,9 @@ from sqlalchemy.orm import Session, selectinload
 
 from ..auth import User, current_user, verified_user
 from ..database import db, now
+from ..storage import MAX_FILE_SIZE, STORAGE
 from .models import Attachment, Note
 from .schemas import AttachmentOut, NoteInput, NoteOut
-
-STORAGE = Path(os.getenv('UPLOAD_DIR', '/data/uploads'))
-MAX_FILE_SIZE = 20 * 1024 * 1024
 
 router = APIRouter(prefix='/api/notes')
 

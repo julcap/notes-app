@@ -1,12 +1,22 @@
 from datetime import timedelta
+import pyotp
 from fastapi import BackgroundTasks
 from sqlalchemy import select
 from app import auth
 from app.database import SessionLocal, now
+from app.notes.models import Note
 from conftest import register, signed_in, token
 
 NOTE={'title':'Private','content':'Secret roadmap','meeting_date':'2026-09-17'}
 def csrf(c):return {'x-csrf-token':c.cookies.get('minutes_csrf')}
+
+def enable_totp(c):
+    r=c.post('/api/auth/2fa/enable',headers=csrf(c))
+    assert r.status_code==200,r.text
+    secret=r.json()['secret']
+    r=c.post('/api/auth/2fa/confirm',json={'code':pyotp.TOTP(secret).now()},headers=csrf(c))
+    assert r.status_code==200,r.text
+    return secret,r.json()['backup_codes']
 
 def test_registration_verification_and_single_use(raw):
     s=register(raw)
@@ -145,3 +155,60 @@ def test_resend_verification(raw):
     raw.headers['Authorization']='Bearer '+s['access_token']
     assert raw.post('/api/auth/resend-verification').status_code==200
     assert len(raw.messages)==2
+
+def test_totp_login_and_backup_codes(client):
+    secret,codes=enable_totp(client)
+    assert len(codes)==10
+    assert client.get('/api/auth/me').json()['totp_enabled'] is True
+    client.headers.pop('Authorization')
+    r=client.post('/api/auth/login',json={'email':'test@example.com','password':'SafePassword123'})
+    assert r.status_code==200 and r.json()['mfa_required'] is True
+    mfa_token=r.json()['mfa_token']
+    assert client.post('/api/auth/login/2fa',json={'mfa_token':mfa_token,'code':'000000'}).status_code==401
+    r=client.post('/api/auth/login/2fa',json={'mfa_token':mfa_token,'code':pyotp.TOTP(secret).now()})
+    assert r.status_code==200
+    client.headers['Authorization']='Bearer '+r.json()['access_token']
+    r=client.post('/api/auth/login',json={'email':'test@example.com','password':'SafePassword123'})
+    mfa_token=r.json()['mfa_token']
+    assert client.post('/api/auth/login/2fa',json={'mfa_token':mfa_token,'code':codes[0]}).status_code==200
+    r=client.post('/api/auth/login',json={'email':'test@example.com','password':'SafePassword123'})
+    mfa_token=r.json()['mfa_token']
+    assert client.post('/api/auth/login/2fa',json={'mfa_token':mfa_token,'code':codes[0]}).status_code==401
+
+def test_totp_disable_requires_password_or_code(client):
+    enable_totp(client)
+    assert client.post('/api/auth/2fa/disable',json={'password':'wrong'},headers=csrf(client)).status_code==401
+    assert client.post('/api/auth/2fa/disable',json={'password':'SafePassword123'},headers=csrf(client)).status_code==200
+    assert client.get('/api/auth/me').json()['totp_enabled'] is False
+
+def test_change_email_flow(client):
+    other=register(client,'taken@example.com')
+    r=client.put('/api/auth/me',json={'email':'taken@example.com'},headers=csrf(client))
+    assert r.status_code==409
+    r=client.put('/api/auth/me',json={'email':'new@example.com'},headers=csrf(client))
+    assert r.status_code==200,r.text
+    assert client.get('/api/auth/me').json()['pending_email']=='new@example.com'
+    assert client.get('/api/auth/me').json()['email']=='test@example.com'
+    change_token=token(client)
+    assert client.post('/api/auth/verify-email',json={'token':change_token}).status_code==200
+    profile=client.get('/api/auth/me').json()
+    assert profile['email']=='new@example.com' and profile['pending_email'] is None
+
+def test_change_password(client):
+    bad={'current_password':'wrong','password':'NewPassword123','password_confirmation':'NewPassword123'}
+    assert client.post('/api/auth/change-password',json=bad,headers=csrf(client)).status_code==401
+    good={'current_password':'SafePassword123','password':'NewPassword123','password_confirmation':'NewPassword123'}
+    assert client.post('/api/auth/change-password',json=good,headers=csrf(client)).status_code==200
+    assert client.post('/api/auth/login',json={'email':'test@example.com','password':'NewPassword123'}).status_code==200
+
+def test_delete_account_cascades_notes_and_attachments(client):
+    n=client.post('/api/notes',json=NOTE).json()
+    client.post('/api/notes/'+n['id']+'/attachments',files={'file':('x.txt',b'bye')})
+    assert client.request('DELETE','/api/auth/me',json={'password':'wrong'},headers=csrf(client)).status_code==401
+    r=client.request('DELETE','/api/auth/me',json={'password':'SafePassword123'},headers=csrf(client))
+    assert r.status_code==200,r.text
+    assert client.get('/api/auth/me').status_code==401
+    assert client.post('/api/auth/login',json={'email':'test@example.com','password':'SafePassword123'}).status_code==401
+    with SessionLocal() as db:
+        assert db.scalar(select(auth.User))is None
+        assert db.scalar(select(Note))is None

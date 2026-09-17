@@ -95,15 +95,25 @@ a {
     margin: 55px 12px 16px
 }
 
-.nav-active {
+.nav-link {
     display: flex;
     align-items: center;
     gap: 12px;
-    background: #dce8df;
     padding: 13px;
     border-radius: 7px;
-    font-weight: 600;
-    font-size: 13px
+    font-size: 13px;
+    text-decoration: none;
+    color: inherit;
+    margin-top: 4px
+}
+
+.nav-link:hover {
+    background: #e3ebe4
+}
+
+.nav-active {
+    background: #dce8df;
+    font-weight: 600
 }
 
 .count {
@@ -235,6 +245,69 @@ p {
     min-height: 600px;
     overflow: hidden;
     box-shadow: 0 6px 20px #244f3210
+}
+
+.account-sections {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    max-width: 560px;
+    padding-bottom: 60px
+}
+
+.card {
+    background: #fff;
+    border: 1px solid #dde5df;
+    border-radius: 11px;
+    padding: 28px;
+    box-shadow: 0 6px 20px #244f3210
+}
+
+.card h2 {
+    font-size: 17px;
+    margin: 0
+}
+
+.card > p:first-of-type {
+    margin-top: 6px
+}
+
+.badge {
+    display: inline-block;
+    font-size: 10px;
+    letter-spacing: .5px;
+    padding: 3px 9px;
+    border-radius: 20px;
+    background: #dce8df;
+    color: #285b46;
+    font-weight: 600
+}
+
+.qr-box {
+    background: #fff;
+    padding: 12px;
+    border-radius: 8px;
+    border: 1px solid #dbe4dc;
+    width: 200px;
+    margin: 14px 0
+}
+
+.qr-box svg {
+    width: 100%;
+    height: auto;
+    display: block
+}
+
+.backup-codes {
+    display: grid;
+    grid-template-columns:1fr 1fr;
+    gap: 8px;
+    background: #f7f9f8;
+    border-radius: 8px;
+    padding: 16px;
+    margin: 14px 0;
+    font-family: monospace;
+    font-size: 13px
 }
 
 .note-list {
@@ -792,19 +865,19 @@ textarea {
     margin-bottom: 28px
 }
 
-.auth-card label {
+.auth-card label, .card label {
     display: block;
     font-size: 12px;
     font-weight: 600;
     margin: 18px 0 8px
 }
 
-.auth-card label span {
+.auth-card label span, .card label span {
     font-weight: 400;
     color: #8d9b8e
 }
 
-.auth-card input:not([type=checkbox]) {
+.auth-card input:not([type=checkbox]), .card input:not([type=checkbox]) {
     display: block;
     width: 100%;
     padding: 13px;

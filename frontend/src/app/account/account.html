@@ -1,0 +1,136 @@
+<div class="shell">
+    <nav-rail active="account" (logoutClick)="logout()"></nav-rail>
+    <main>
+        <header>
+            <div class="breadcrumb">Workspace <span>/</span> Account</div>
+            <span class="private-label">{{ auth.user?.display_name || auth.user?.email }}
+                <a class="text-btn" routerLink="/">Meeting notes</a>
+                <button class="text-btn" (click)="logout()">Log out</button></span></header>
+        <section class="page-heading">
+            <div>
+                <div class="eyebrow">YOUR ACCOUNT</div>
+                <h1>Account settings</h1>
+                <p>Manage your profile, security, and sign-in.</p>
+            </div>
+        </section>
+        <div *ngIf="error" class="alert" role="alert">{{ error }}</div>
+        <div *ngIf="message" class="success" role="status">{{ message }}</div>
+        <div class="account-sections">
+            <section class="card">
+                <h2>Profile</h2>
+                <p>{{ auth.user?.auth_provider === 'local' ? 'Signs in with email and password.' : 'Signs in with ' + (auth.user?.auth_provider | titlecase) + '.' }}</p>
+                <form (ngSubmit)="saveProfile()" #profileForm="ngForm">
+                    <label>Display name<input name="displayName" [(ngModel)]="displayName" maxlength="100"
+                                              autocomplete="name"></label>
+                    <label>Email<input type="email" name="email" [(ngModel)]="email" required email maxlength="320"
+                                       autocomplete="email"></label>
+                    <p class="password-hint" *ngIf="auth.user?.pending_email">Confirmation pending for
+                        {{ auth.user?.pending_email }}. Check that inbox to finish the change.</p>
+                    <button class="primary auth-submit" type="submit"
+                            [disabled]="busy || profileForm.invalid">{{ busy ? 'Saving…' : 'Save changes' }}</button>
+                </form>
+            </section>
+
+            <section class="card" *ngIf="auth.user?.has_password">
+                <h2>Change password</h2>
+                <form (ngSubmit)="changePassword()" #passwordForm="ngForm">
+                    <label>Current password<input type="password" name="currentPassword"
+                                                  [(ngModel)]="currentPassword" required
+                                                  autocomplete="current-password"></label>
+                    <label>New password<input type="password" name="newPassword" [(ngModel)]="newPassword" required
+                                              autocomplete="new-password" maxlength="72"></label>
+                    <p class="password-hint" [class.invalid]="newPassword && !validNewPassword">At least 10
+                        characters, one letter, and one number. Maximum 72 UTF-8 bytes.</p>
+                    <label>Confirm new password<input type="password" name="newPasswordConfirmation"
+                                                       [(ngModel)]="newPasswordConfirmation" required
+                                                       autocomplete="new-password" maxlength="72"></label>
+                    <p class="password-hint invalid" *ngIf="newPasswordConfirmation && newPassword!==newPasswordConfirmation">
+                        Passwords do not match.</p>
+                    <button class="primary auth-submit" type="submit"
+                            [disabled]="busy || passwordForm.invalid || !validNewPassword || newPassword!==newPasswordConfirmation">{{ busy ? 'Please wait…' : 'Update password' }}
+                    </button>
+                </form>
+            </section>
+
+            <section class="card">
+                <h2>Two-factor authentication <span class="badge" *ngIf="auth.user?.totp_enabled">ENABLED</span></h2>
+                <ng-container *ngIf="!auth.user?.totp_enabled">
+                    <ng-container *ngIf="!backupCodes">
+                        <ng-container *ngIf="!mfaSecret">
+                            <p>Add an extra layer of security. You'll need a code from an authenticator app to sign
+                                in.</p>
+                            <button class="secondary" type="button" (click)="startEnable2fa()"
+                                    [disabled]="busy">Enable two-factor authentication
+                            </button>
+                        </ng-container>
+                        <ng-container *ngIf="mfaSecret">
+                            <p>Scan this code with your authenticator app (Google Authenticator, Authy, etc.):</p>
+                            <div class="qr-box" [innerHTML]="mfaQr"></div>
+                            <p>Can't scan? Enter this code manually: <code>{{ mfaSecret }}</code></p>
+                            <form (ngSubmit)="confirmEnable2fa()" #mfaForm="ngForm">
+                                <label>6-digit code<input type="text" name="mfaCode" [(ngModel)]="mfaCode" required
+                                                          inputmode="numeric" autocomplete="one-time-code"
+                                                          placeholder="123456"></label>
+                                <button class="primary auth-submit" type="submit"
+                                        [disabled]="busy || !mfaCode">{{ busy ? 'Please wait…' : 'Confirm and enable' }}
+                                </button>
+                                <button class="text-btn" type="button" (click)="cancelEnable2fa()"
+                                        [disabled]="busy">Cancel
+                                </button>
+                            </form>
+                        </ng-container>
+                    </ng-container>
+                    <ng-container *ngIf="backupCodes">
+                        <p><strong>Save these backup codes.</strong> Each one can be used once if you lose access to
+                            your authenticator.</p>
+                        <div class="backup-codes"><span *ngFor="let code of backupCodes">{{ code }}</span></div>
+                        <button class="secondary" type="button" (click)="dismissBackupCodes()">I've saved these codes
+                        </button>
+                    </ng-container>
+                </ng-container>
+                <ng-container *ngIf="auth.user?.totp_enabled">
+                    <p>Two-factor authentication is protecting your account.</p>
+                    <form (ngSubmit)="disable2fa()" #disableForm="ngForm">
+                        <label *ngIf="auth.user?.has_password">Current password<input type="password"
+                                                                                      name="disablePassword"
+                                                                                      [(ngModel)]="disablePassword"
+                                                                                      autocomplete="current-password"></label>
+                        <label>Or a 6-digit code / backup code<input type="text" name="disableCode"
+                                                                      [(ngModel)]="disableCode"
+                                                                      autocomplete="one-time-code"></label>
+                        <button class="text-btn danger" type="submit"
+                                [disabled]="busy || (!disablePassword && !disableCode)">Disable two-factor
+                            authentication
+                        </button>
+                    </form>
+                </ng-container>
+            </section>
+
+            <section class="card">
+                <h2 class="danger">Danger zone</h2>
+                <p>Permanently delete your account and everything it owns. This cannot be undone.</p>
+                <button class="text-btn danger" type="button" (click)="confirmDelete=true" *ngIf="!confirmDelete"
+                        [disabled]="busy">Delete account
+                </button>
+                <div *ngIf="confirmDelete" class="delete-confirm" role="alert">
+                    <p>This deletes your account, all meeting notes, and all attachments. This cannot be undone.</p>
+                    <label *ngIf="auth.user?.has_password">Enter your password to confirm<input type="password"
+                                                                                                 [(ngModel)]="deletePassword"
+                                                                                                 name="deletePassword"
+                                                                                                 autocomplete="current-password"></label>
+                    <label *ngIf="!auth.user?.has_password">Type "delete account" to confirm<input type="text"
+                                                                                                    [(ngModel)]="deleteConfirmation"
+                                                                                                    name="deleteConfirmation"></label>
+                    <div>
+                        <button class="text-btn" type="button" (click)="confirmDelete=false" [disabled]="busy">Cancel
+                        </button>
+                        <button class="primary danger-fill" type="button" (click)="deleteAccount()"
+                                [disabled]="busy || (auth.user?.has_password ? !deletePassword : deleteConfirmation.trim().toLowerCase()!=='delete account')">
+                            Permanently delete account
+                        </button>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </main>
+</div>

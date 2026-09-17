@@ -35,11 +35,14 @@ def deliver_email(recipient, subject, body):
         logging.getLogger(__name__).error('Transactional email delivery failed; check SES/SMTP configuration. Use resend or request recovery again.')
 
 
-def email_link(session, user, purpose, tasks):
+SUBJECTS = {'reset': 'Reset your Minutes password', 'verify': 'Verify your Minutes email', 'change_email': 'Confirm your new Minutes email'}
+
+
+def email_link(session, user, purpose, tasks, recipient=None):
     raw = secrets.token_urlsafe(48)
     session.add(EmailToken(user_id=user.id, purpose=purpose, token_hash=digest(raw), expires_at=now() + timedelta(hours=1)))
     session.commit()
     path = 'reset-password' if purpose == 'reset' else 'verify-email'
     # URL fragment keeps the bearer token out of proxy/access logs and Referer headers.
     link = f'{APP_URL}/{path}#token={raw}'
-    tasks.add_task(deliver_email, user.email, 'Reset your Minutes password' if purpose == 'reset' else 'Verify your Minutes email', f'Open this link within one hour:\n\n{link}\n\nIf you did not request this, you can ignore this email.')
+    tasks.add_task(deliver_email, recipient or user.email, SUBJECTS[purpose], f'Open this link within one hour:\n\n{link}\n\nIf you did not request this, you can ignore this email.')

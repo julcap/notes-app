@@ -15,7 +15,19 @@
             <p *ngIf="mode==='verify'">Confirm your email before creating your first note.</p>
             <div *ngIf="error" class="alert" role="alert">{{ error }}</div>
             <div *ngIf="message" class="success" role="status">{{ message }}</div>
-            <form (ngSubmit)="submit()" #form="ngForm" *ngIf="!done && mode!=='callback'">
+            <ng-container *ngIf="mfaToken">
+                <p>Enter the 6-digit code from your authenticator app, or one of your backup codes.</p>
+                <form (ngSubmit)="submitCode()" #codeForm="ngForm">
+                    <label>Authentication code<input type="text" name="code" [(ngModel)]="code" required
+                                                      autocomplete="one-time-code" inputmode="numeric"
+                                                      placeholder="123456 or backup code"></label>
+                    <button class="primary auth-submit" type="submit"
+                            [disabled]="busy || !code">{{ busy ? 'Please wait…' : 'Verify' }}</button>
+                </form>
+                <p class="auth-switch"><a routerLink="/login">Back to sign in</a></p>
+            </ng-container>
+            <ng-container *ngIf="!mfaToken">
+            <form (ngSubmit)="submit()" #form="ngForm" *ngIf="!done && mode!=='callback' && mode!=='login-2fa'">
                 <label *ngIf="mode==='register'">Display name <span>(optional)</span><input name="displayName"
                                                                                             [(ngModel)]="displayName"
                                                                                             maxlength="100"
@@ -64,12 +76,13 @@
                 account</a></p>
             <p class="auth-switch" *ngIf="mode==='register'">Already have an account? <a routerLink="/login">Sign in</a>
             </p>
-            <p class="auth-switch" *ngIf="mode==='forgot'||mode==='reset'||mode==='callback'"><a routerLink="/login">Back
-                to sign in</a></p>
+            <p class="auth-switch" *ngIf="mode==='forgot'||mode==='reset'||mode==='callback'||mode==='login-2fa'"><a
+                    routerLink="/login">Back to sign in</a></p>
             <div *ngIf="mode==='verify'" class="auth-switch"><a routerLink="/" *ngIf="done">Go to meeting notes →</a>
                 <button class="text-btn" (click)="resend()" [disabled]="busy" *ngIf="!done">Resend verification email
                 </button>
                 <a routerLink="/login" *ngIf="!done">Back to sign in</a></div>
+            </ng-container>
         </section>
     </main>
 </div>

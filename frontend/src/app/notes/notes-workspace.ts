@@ -2,16 +2,17 @@ import {Component, HostListener, inject, OnInit} from '@angular/core';
 import {CommonModule} from '@angular/common';
 import {FormsModule} from '@angular/forms';
 import {HttpClient} from '@angular/common/http';
-import {CanDeactivateFn} from '@angular/router';
+import {CanDeactivateFn, RouterLink} from '@angular/router';
 import {firstValueFrom} from 'rxjs';
 
 import {AuthService} from '../auth/auth.service';
+import {NavRail} from '../shell/nav-rail';
 import {Attachment, Note} from './note.model';
 
 @Component({
     selector: 'meeting-workspace',
     standalone: true,
-    imports: [CommonModule, FormsModule],
+    imports: [CommonModule, FormsModule, RouterLink, NavRail],
     templateUrl: './notes-workspace.html'
 })
 export class NotesWorkspace implements OnInit {

@@ -11,10 +11,12 @@ const AUTH_PAGES: Array<[path: string, mode: string]> = [
     ['reset-password', 'reset'],
     ['verify-email', 'verify'],
     ['auth/callback', 'callback'],
+    ['login-2fa', 'login-2fa'],
 ];
 
 export const routes: Routes = [
     {path: '', component: NotesWorkspace, canActivate: [authGuard], canDeactivate: [leaveNotesGuard]},
+    {path: 'account', loadComponent: () => import('./account/account').then(m => m.Account), canActivate: [authGuard]},
     ...AUTH_PAGES.map(([path, mode]) => ({path, component: AuthPage, data: {mode}})),
     {path: '**', redirectTo: ''},
 ];

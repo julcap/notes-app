@@ -40,3 +40,37 @@ class TokenInput(BaseModel):
 
 class Reset(PasswordInput, TokenInput):
     pass
+
+
+class TotpCode(BaseModel):
+    code: str = Field(min_length=6, max_length=12)
+
+
+class Login2FA(BaseModel):
+    mfa_token: str = Field(min_length=20, max_length=2000)
+    code: str = Field(min_length=6, max_length=12)
+
+
+class TotpDisable(BaseModel):
+    password: str = Field(default='', max_length=1000)
+    code: str = Field(default='', max_length=12)
+
+
+class ChangePassword(PasswordInput):
+    current_password: str = Field(max_length=1000)
+
+
+class ProfileUpdate(BaseModel):
+    display_name: str | None = Field(default=None, max_length=100)
+    email: EmailStr | None = None
+
+    @model_validator(mode='after')
+    def normalize(self):
+        if self.email is not None:
+            self.email = str(self.email).lower()
+        return self
+
+
+class DeleteAccount(BaseModel):
+    password: str = Field(default='', max_length=1000)
+    confirmation: str = Field(default='', max_length=50)

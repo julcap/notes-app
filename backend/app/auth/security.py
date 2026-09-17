@@ -21,6 +21,10 @@ def password_hash(password):
 DUMMY_HASH = bcrypt.hashpw(b'nonexistent-account-password', bcrypt.gensalt(rounds=12))
 
 
+def check_password(password, hash_):
+    return bool(hash_) and len(password.encode()) <= 72 and bcrypt.checkpw(password.encode(), hash_.encode())
+
+
 def validate_password(password):
     if len(password) < 10 or len(password.encode()) > 72 or not re.search('[a-zA-Z]', password) or not re.search('[0-9]', password):
         raise ValueError('Password needs at least 10 characters, a letter and a number (maximum 72 UTF-8 bytes).')

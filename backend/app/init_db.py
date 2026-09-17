@@ -9,6 +9,9 @@ with engine.begin() as connection:
     Base.metadata.create_all(connection)
     connection.execute(text('ALTER TABLE notes ADD COLUMN IF NOT EXISTS owner_id INTEGER REFERENCES users(id)'))
     connection.execute(text('CREATE INDEX IF NOT EXISTS ix_notes_owner_id ON notes(owner_id)'))
+    connection.execute(text('ALTER TABLE users ADD COLUMN IF NOT EXISTS pending_email VARCHAR(320)'))
+    connection.execute(text('ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_secret VARCHAR(200)'))
+    connection.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN NOT NULL DEFAULT false"))
     # Enforce ownership on every future insert/update, while preserving old rows.
     exists=connection.execute(text("SELECT 1 FROM pg_constraint WHERE conname='notes_owner_required' AND conrelid='notes'::regclass")).scalar()
     if not exists:

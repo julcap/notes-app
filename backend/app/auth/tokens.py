@@ -17,11 +17,30 @@ bearer = HTTPBearer(auto_error=False)
 
 
 def profile(user):
-    return {'id': user.id, 'email': user.email, 'display_name': user.display_name, 'email_verified': user.email_verified, 'auth_provider': user.auth_provider}
+    return {
+        'id': user.id, 'email': user.email, 'pending_email': user.pending_email, 'display_name': user.display_name,
+        'email_verified': user.email_verified, 'auth_provider': user.auth_provider, 'has_password': bool(user.password_hash),
+        'totp_enabled': user.totp_enabled, 'created_at': user.created_at,
+    }
 
 
 def access(user, session_id):
     return jwt.encode({'sub': str(user.id), 'sid': session_id, 'ver': user.token_version, 'type': 'access', 'iat': now(), 'exp': now() + timedelta(minutes=15), 'iss': 'minutes', 'aud': 'minutes'}, SECRET, algorithm='HS256')
+
+
+def mfa_challenge(user, remember=False):
+    return jwt.encode({'sub': str(user.id), 'type': 'mfa', 'remember': remember, 'iat': now(), 'exp': now() + timedelta(minutes=5), 'iss': 'minutes', 'aud': 'minutes'}, SECRET, algorithm='HS256')
+
+
+def consume_mfa(raw, session):
+    try:
+        claims = jwt.decode(raw, SECRET, algorithms=['HS256'], issuer='minutes', audience='minutes', options={'require': ['exp', 'sub', 'type', 'remember']})
+        user = session.get(User, int(claims['sub']))
+        if claims['type'] != 'mfa' or not user or not user.totp_enabled:
+            raise ValueError()
+        return user, bool(claims['remember'])
+    except (jwt.InvalidTokenError, ValueError, TypeError):
+        raise HTTPException(401, 'This sign-in attempt expired. Please sign in again.')
 
 
 def cookie(response, raw, csrf, row):
@@ -73,9 +92,9 @@ def refresh_row(request, session):
     return row
 
 
-def consume(session, raw, purpose):
-    row = session.scalar(select(EmailToken).where(EmailToken.token_hash == digest(raw), EmailToken.purpose == purpose).with_for_update())
+def consume(session, raw, purposes):
+    row = session.scalar(select(EmailToken).where(EmailToken.token_hash == digest(raw), EmailToken.purpose.in_(purposes)).with_for_update())
     if not row or row.used_at or row.expires_at <= now():
         raise HTTPException(400, 'This link is invalid or expired. Request a new one.')
     row.used_at = now()
-    return session.get(User, row.user_id)
+    return session.get(User, row.user_id), row.purpose

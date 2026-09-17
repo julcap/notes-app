@@ -2,10 +2,12 @@ import {Component, OnInit, inject} from '@angular/core';
 import {CommonModule} from '@angular/common';
 import {FormsModule} from '@angular/forms';
 import {ActivatedRoute, Router, RouterLink} from '@angular/router';
-import {HttpClient, HttpErrorResponse} from '@angular/common/http';
+import {HttpClient} from '@angular/common/http';
 import {firstValueFrom} from 'rxjs';
 
 import {AuthService} from '../auth.service';
+import {errorText} from '../error-text';
+import {validPassword} from '../password-policy';
 
 @Component({
     selector: 'auth-page',
@@ -30,20 +32,24 @@ export class AuthPage implements OnInit {
     token = '';
     done = false;
     providers: Record<string, boolean> = {google: false, facebook: false, amazon: false};
+    mfaToken = '';
+    code = '';
 
     get title() {
+        if (this.mfaToken) return 'Enter your code.';
         return ({
             login: 'Welcome back.',
             register: 'Make room for good ideas.',
             forgot: 'Forgot your password?',
             reset: 'A fresh start.',
             verify: 'Verify your email.',
-            callback: 'Signing you in…'
+            callback: 'Signing you in…',
+            'login-2fa': 'Enter your code.'
         } as Record<string, string>)[this.mode];
     }
 
     get validPassword() {
-        return this.password.length >= 10 && new TextEncoder().encode(this.password).length <= 72 && /[a-zA-Z]/.test(this.password) && /[0-9]/.test(this.password);
+        return validPassword(this.password);
     }
 
     get passwordIssue() {
@@ -66,6 +72,10 @@ export class AuthPage implements OnInit {
             }
         }
         if (this.mode === 'verify' && !this.token) await this.auth.ensure();
+        if (this.mode === 'login-2fa') {
+            this.mfaToken = this.token;
+            if (!this.mfaToken) this.error = 'This sign-in attempt expired. Please sign in again.';
+        }
     }
 
     async submit() {
@@ -85,8 +95,8 @@ export class AuthPage implements OnInit {
                 });
                 await this.router.navigateByUrl('/');
             } else if (this.mode === 'login') {
-                await this.auth.action('login', {email: this.email, password: this.password, remember: this.remember});
-                await this.router.navigateByUrl('/');
+                const result = await this.auth.action('login', {email: this.email, password: this.password, remember: this.remember});
+                if (result.mfa_required) this.mfaToken = result.mfa_token; else await this.router.navigateByUrl('/');
             } else if (this.mode === 'forgot') {
                 this.message = (await this.auth.action('forgot-password', {email: this.email})).message;
                 this.done = true;
@@ -113,12 +123,21 @@ export class AuthPage implements OnInit {
         }
     }
 
-    errorText(e: unknown) {
-        if (e instanceof HttpErrorResponse) {
-            const d = e.error?.detail;
-            return typeof d === 'string' ? d : Array.isArray(d) ? d.map((x: any) => x.msg).join(' ') : 'Could not connect. Please try again.';
+    errorText = errorText;
+
+    async submitCode() {
+        if (this.busy) return;
+        this.busy = true;
+        this.error = '';
+        try {
+            await this.auth.action('login/2fa', {mfa_token: this.mfaToken, code: this.code});
+            await this.router.navigateByUrl('/');
+        } catch (e) {
+            this.error = this.errorText(e);
+            this.code = '';
+        } finally {
+            this.busy = false;
         }
-        return e instanceof Error ? e.message : 'Please try again.';
     }
 
     async resend() {
