@@ -11,7 +11,7 @@ def raw(monkeypatch):
     Base.metadata.drop_all(engine)
     Base.metadata.create_all(engine)
     messages=[]
-    monkeypatch.setattr(auth,'send_email',lambda recipient,subject,body:messages.append((recipient,subject,body)))
+    monkeypatch.setattr(auth.email,'send_email',lambda recipient,subject,body:messages.append((recipient,subject,body)))
     with TestClient(app,headers=HEADERS) as c:
         c.messages=messages
         yield c

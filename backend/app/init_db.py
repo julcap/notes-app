@@ -1,5 +1,7 @@
 from sqlalchemy import text
-from .main import Base, engine
+from .database import Base, engine
+from .auth import models as auth_models  # noqa: F401 - registers users/sessions tables with Base.metadata
+from .notes import models as notes_models  # noqa: F401 - registers notes/attachments tables with Base.metadata
 # Idempotent initial schema + upgrade for pre-auth local installs. Existing notes
 # are preserved unassigned, never given to the next person who registers.
 with engine.begin() as connection:

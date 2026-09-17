@@ -1,0 +1,117 @@
+import os
+import uuid
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
+from sqlalchemy import or_, select
+from sqlalchemy.orm import Session, selectinload
+
+from ..auth import User, current_user, verified_user
+from ..database import db, now
+from .models import Attachment, Note
+from .schemas import AttachmentOut, NoteInput, NoteOut
+
+STORAGE = Path(os.getenv('UPLOAD_DIR', '/data/uploads'))
+MAX_FILE_SIZE = 20 * 1024 * 1024
+
+router = APIRouter(prefix='/api/notes')
+
+
+def get_note(session, note_id, user):
+    note = session.get(Note, note_id)
+    if note is None or note.owner_id != user.id:
+        raise HTTPException(404, 'Note not found')
+    return note
+
+
+@router.get('', response_model=list[NoteOut])
+def notes(q: str = Query('', max_length=200), session: Session = Depends(db), user: User = Depends(current_user)):
+    query = select(Note).where(Note.owner_id == user.id).options(selectinload(Note.attachments))
+    if q.strip():
+        term = '%' + q.strip().replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%'
+        query = query.where(or_(Note.title.ilike(term, escape='\\'), Note.content.ilike(term, escape='\\'), Note.attendees.ilike(term, escape='\\')))
+    return session.scalars(query.order_by(Note.meeting_date.desc(), Note.updated_at.desc())).all()
+
+
+@router.post('', response_model=NoteOut, status_code=201)
+def create_note(payload: NoteInput, session: Session = Depends(db), user: User = Depends(verified_user)):
+    note = Note(owner_id=user.id, **payload.model_dump())
+    session.add(note)
+    session.commit()
+    session.refresh(note)
+    return note
+
+
+@router.get('/{note_id}', response_model=NoteOut)
+def read_note(note_id: str, session: Session = Depends(db), user: User = Depends(current_user)):
+    return get_note(session, note_id, user)
+
+
+@router.put('/{note_id}', response_model=NoteOut)
+def update_note(note_id: str, payload: NoteInput, session: Session = Depends(db), user: User = Depends(current_user)):
+    note = get_note(session, note_id, user)
+    for key, value in payload.model_dump().items():
+        setattr(note, key, value)
+    note.updated_at = now()
+    session.commit()
+    session.refresh(note)
+    return note
+
+
+@router.delete('/{note_id}', status_code=204)
+def delete_note(note_id: str, session: Session = Depends(db), user: User = Depends(current_user)):
+    note = get_note(session, note_id, user)
+    ids = [a.id for a in note.attachments]
+    session.delete(note)
+    session.commit()
+    for item in ids:
+        (STORAGE / item).unlink(missing_ok=True)
+
+
+@router.post('/{note_id}/attachments', response_model=AttachmentOut, status_code=201)
+def upload(note_id: str, file: UploadFile, session: Session = Depends(db), user: User = Depends(current_user)):
+    note = get_note(session, note_id, user)
+    attachment_id = str(uuid.uuid4())
+    path = STORAGE / attachment_id
+    size = 0
+    try:
+        with path.open('wb') as target:
+            while chunk := file.file.read(1024 * 1024):
+                size += len(chunk)
+                if size > MAX_FILE_SIZE:
+                    raise HTTPException(413, 'Files must be 20 MB or smaller')
+                target.write(chunk)
+        filename = Path((file.filename or 'attachment').replace('\\', '/')).name[:255] or 'attachment'
+        attachment = Attachment(id=attachment_id, note_id=note.id, filename=filename, size=size)
+        session.add(attachment)
+        note.updated_at = now()
+        session.commit()
+        session.refresh(attachment)
+        return attachment
+    except Exception:
+        session.rollback()
+        path.unlink(missing_ok=True)
+        raise
+    finally:
+        file.file.close()
+
+
+@router.get('/{note_id}/attachments/{attachment_id}')
+def download(note_id: str, attachment_id: str, session: Session = Depends(db), user: User = Depends(current_user)):
+    get_note(session, note_id, user)
+    item = session.get(Attachment, attachment_id)
+    if item is None or item.note_id != note_id or not (STORAGE / item.id).is_file():
+        raise HTTPException(404, 'Attachment not found')
+    return FileResponse(STORAGE / item.id, filename=item.filename, media_type='application/octet-stream', headers={'X-Content-Type-Options': 'nosniff'})
+
+
+@router.delete('/{note_id}/attachments/{attachment_id}', status_code=204)
+def delete_attachment(note_id: str, attachment_id: str, session: Session = Depends(db), user: User = Depends(current_user)):
+    get_note(session, note_id, user)
+    item = session.get(Attachment, attachment_id)
+    if item is None or item.note_id != note_id:
+        raise HTTPException(404, 'Attachment not found')
+    session.delete(item)
+    session.commit()
+    (STORAGE / item.id).unlink(missing_ok=True)
