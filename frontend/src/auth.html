@@ -1,15 +1,75 @@
-<div class="auth-layout"><aside class="auth-story"><a class="brand" routerLink="/login"><span class="brand-icon">m.</span> minutes.</a><div><div class="eyebrow">LESS SCATTER. MORE CLARITY.</div><h1>Every conversation.<br>A little more clarity.</h1><p>Your notes, decisions, and next steps.<br>All together. Just for you.</p></div><small>A space for conversations that move things forward.</small></aside><main class="auth-main"><section class="auth-card"><div class="eyebrow">YOUR PERSONAL WORKSPACE</div><h1>{{title}}</h1><p *ngIf="mode==='login'">Sign in to pick up where you left off.</p><p *ngIf="mode==='register'">Create your account to keep the conversation going.</p><p *ngIf="mode==='forgot'">We’ll email you a link to reset your password.</p><p *ngIf="mode==='verify'">Confirm your email before creating your first note.</p><div *ngIf="error" class="alert" role="alert">{{error}}</div><div *ngIf="message" class="success" role="status">{{message}}</div>
-<form (ngSubmit)="submit()" #form="ngForm" *ngIf="!done && mode!=='callback'">
- <label *ngIf="mode==='register'">Display name <span>(optional)</span><input name="displayName" [(ngModel)]="displayName" maxlength="100" autocomplete="name"></label>
- <label *ngIf="mode==='login'||mode==='register'||mode==='forgot'">Email<input type="email" name="email" [(ngModel)]="email" required email maxlength="320" autocomplete="email" placeholder="you@example.com"></label>
- <label *ngIf="mode==='login'||mode==='register'||mode==='reset'">Password<input type="password" name="password" [(ngModel)]="password" required [attr.autocomplete]="mode==='login'?'current-password':'new-password'" [attr.maxlength]="mode==='login'?1000:72"></label>
- <p class="password-hint" *ngIf="mode==='register'||mode==='reset'" [class.invalid]="passwordIssue">At least 10 characters, one letter, and one number. Maximum 72 UTF-8 bytes.</p>
- <label *ngIf="mode==='register'||mode==='reset'">Confirm password<input type="password" name="confirmation" [(ngModel)]="confirmation" required autocomplete="new-password" maxlength="72"></label>
- <p class="password-hint invalid" *ngIf="confirmation && password!==confirmation">Passwords do not match.</p>
- <div class="auth-options" *ngIf="mode==='login'||mode==='register'"><label class="checkbox"><input type="checkbox" name="remember" [(ngModel)]="remember"> Remember me for 30 days</label><a routerLink="/forgot-password" *ngIf="mode==='login'">Forgot password?</a></div>
- <button class="primary auth-submit" type="submit" [disabled]="busy || form.invalid || ((mode==='register'||mode==='reset') && (!validPassword || password!==confirmation)) || ((mode==='verify'||mode==='reset') && !token)">{{busy?'Please wait…':mode==='login'?'Sign in':mode==='register'?'Create account':mode==='forgot'?'Send reset link':mode==='reset'?'Set new password':'Verify email'}}</button>
- <p *ngIf="(mode==='verify'||mode==='reset')&&!token">Open the link from your email to continue.</p>
-</form>
-<div *ngIf="mode==='login'" class="social-login"><div class="or-divider">or continue with</div><div class="social-buttons"><a *ngFor="let provider of ['google','facebook','amazon']" [href]="providers[provider]?'/api/auth/'+provider+'/login?remember='+remember:null" [attr.aria-disabled]="!providers[provider]" [class.unavailable]="!providers[provider]" [title]="providers[provider]?'Sign in with '+provider:'Provider setup required'">{{provider | titlecase}}</a></div><small *ngIf="!providers['google']||!providers['facebook']||!providers['amazon']">Unavailable providers still need to be configured.</small></div>
-<p class="auth-switch" *ngIf="mode==='login'">New to Minutes? <a routerLink="/register">Create an account</a></p><p class="auth-switch" *ngIf="mode==='register'">Already have an account? <a routerLink="/login">Sign in</a></p><p class="auth-switch" *ngIf="mode==='forgot'||mode==='reset'||mode==='callback'"><a routerLink="/login">Back to sign in</a></p><div *ngIf="mode==='verify'" class="auth-switch"><a routerLink="/" *ngIf="done">Go to meeting notes →</a><button class="text-btn" (click)="resend()" [disabled]="busy" *ngIf="!done">Resend verification email</button><a routerLink="/login" *ngIf="!done">Back to sign in</a></div>
-</section></main></div>
+<div class="auth-layout">
+    <aside class="auth-story"><a class="brand" routerLink="/login"><span class="brand-icon">m.</span> minutes.</a>
+        <div>
+            <div class="eyebrow">LESS SCATTER. MORE CLARITY.</div>
+            <h1>Every conversation.<br>A little more clarity.</h1>
+            <p>Your notes, decisions, and next steps.<br>All together. Just for you.</p></div>
+        <small>A space for conversations that move things forward.</small></aside>
+    <main class="auth-main">
+        <section class="auth-card">
+            <div class="eyebrow">YOUR PERSONAL WORKSPACE</div>
+            <h1>{{ title }}</h1>
+            <p *ngIf="mode==='login'">Sign in to pick up where you left off.</p>
+            <p *ngIf="mode==='register'">Create your account to keep the conversation going.</p>
+            <p *ngIf="mode==='forgot'">We’ll email you a link to reset your password.</p>
+            <p *ngIf="mode==='verify'">Confirm your email before creating your first note.</p>
+            <div *ngIf="error" class="alert" role="alert">{{ error }}</div>
+            <div *ngIf="message" class="success" role="status">{{ message }}</div>
+            <form (ngSubmit)="submit()" #form="ngForm" *ngIf="!done && mode!=='callback'">
+                <label *ngIf="mode==='register'">Display name <span>(optional)</span><input name="displayName"
+                                                                                            [(ngModel)]="displayName"
+                                                                                            maxlength="100"
+                                                                                            autocomplete="name"></label>
+                <label *ngIf="mode==='login'||mode==='register'||mode==='forgot'">Email<input type="email" name="email"
+                                                                                              [(ngModel)]="email"
+                                                                                              required email
+                                                                                              maxlength="320"
+                                                                                              autocomplete="email"
+                                                                                              placeholder="you@example.com"></label>
+                <label *ngIf="mode==='login'||mode==='register'||mode==='reset'">Password<input type="password"
+                                                                                                name="password"
+                                                                                                [(ngModel)]="password"
+                                                                                                required
+                                                                                                [attr.autocomplete]="mode==='login'?'current-password':'new-password'"
+                                                                                                [attr.maxlength]="mode==='login'?1000:72"></label>
+                <p class="password-hint" *ngIf="mode==='register'||mode==='reset'" [class.invalid]="passwordIssue">At
+                    least 10 characters, one letter, and one number. Maximum 72 UTF-8 bytes.</p>
+                <label *ngIf="mode==='register'||mode==='reset'">Confirm password<input type="password"
+                                                                                        name="confirmation"
+                                                                                        [(ngModel)]="confirmation"
+                                                                                        required
+                                                                                        autocomplete="new-password"
+                                                                                        maxlength="72"></label>
+                <p class="password-hint invalid" *ngIf="confirmation && password!==confirmation">Passwords do not
+                    match.</p>
+                <div class="auth-options" *ngIf="mode==='login'||mode==='register'"><label class="checkbox"><input
+                        type="checkbox" name="remember" [(ngModel)]="remember"> Remember me for 30 days</label><a
+                        routerLink="/forgot-password" *ngIf="mode==='login'">Forgot password?</a></div>
+                <button class="primary auth-submit" type="submit"
+                        [disabled]="busy || form.invalid || ((mode==='register'||mode==='reset') && (!validPassword || password!==confirmation)) || ((mode==='verify'||mode==='reset') && !token)">{{ busy ? 'Please wait…' : mode === 'login' ? 'Sign in' : mode === 'register' ? 'Create account' : mode === 'forgot' ? 'Send reset link' : mode === 'reset' ? 'Set new password' : 'Verify email' }}
+                </button>
+                <p *ngIf="(mode==='verify'||mode==='reset')&&!token">Open the link from your email to continue.</p>
+            </form>
+            <div *ngIf="mode==='login'" class="social-login">
+                <div class="or-divider">or continue with</div>
+                <div class="social-buttons"><a *ngFor="let provider of ['google','facebook','amazon']"
+                                               [href]="providers[provider]?'/api/auth/'+provider+'/login?remember='+remember:null"
+                                               [attr.aria-disabled]="!providers[provider]"
+                                               [class.unavailable]="!providers[provider]"
+                                               [title]="providers[provider]?'Sign in with '+provider:'Provider setup required'">{{ provider | titlecase }}</a>
+                </div>
+                <small *ngIf="!providers['google']||!providers['facebook']||!providers['amazon']">Unavailable providers
+                    still need to be configured.</small></div>
+            <p class="auth-switch" *ngIf="mode==='login'">New to Minutes? <a routerLink="/register">Create an
+                account</a></p>
+            <p class="auth-switch" *ngIf="mode==='register'">Already have an account? <a routerLink="/login">Sign in</a>
+            </p>
+            <p class="auth-switch" *ngIf="mode==='forgot'||mode==='reset'||mode==='callback'"><a routerLink="/login">Back
+                to sign in</a></p>
+            <div *ngIf="mode==='verify'" class="auth-switch"><a routerLink="/" *ngIf="done">Go to meeting notes →</a>
+                <button class="text-btn" (click)="resend()" [disabled]="busy" *ngIf="!done">Resend verification email
+                </button>
+                <a routerLink="/login" *ngIf="!done">Back to sign in</a></div>
+        </section>
+    </main>
+</div>
