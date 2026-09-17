@@ -66,10 +66,8 @@
                                                                  required></label><label>Attendees<input
                                 name="attendees" placeholder="e.g. Alex, Jordan, you" [(ngModel)]="draft.attendees"
                                 maxlength="1000"></label></div>
-                        <label class="field-label" for="content">Notes</label><textarea id="content" name="content"
-                                                                                        [(ngModel)]="draft.content"
-                                                                                        maxlength="100000"
-                                                                                        placeholder="Capture the context, decisions, and next steps…"></textarea>
+                        <label class="field-label" id="content-label">Notes</label>
+                        <markdown-editor labelledBy="content-label" [(value)]="draft.content"></markdown-editor>
                         <div class="editor-hint">{{ draft.content.length | number }} characters · Attach files after
                             saving
                         </div>
@@ -98,7 +96,8 @@
                         </div>
                         <div class="divider"></div>
                         <div class="section-label">THE CONVERSATION</div>
-                        <div class="note-body">{{ n.content || 'No notes added yet. Edit this meeting to capture the conversation.' }}</div>
+                        <markdown-renderer class="note-body"
+                                           [source]="n.content || 'No notes added yet. Edit this meeting to capture the conversation.'"></markdown-renderer>
                         <div class="attachments">
                             <div class="attachment-heading"><h4>Attachments <span>{{ n.attachments.length }}</span></h4>
                                 <label class="text-btn upload" [class.disabled]="busy">＋ Add file<input type="file"

@@ -8,11 +8,13 @@ import {firstValueFrom} from 'rxjs';
 import {AuthService} from '../auth/auth.service';
 import {NavRail} from '../shell/nav-rail';
 import {ActionItem, Attachment, Note} from './note.model';
+import {MarkdownEditor} from './markdown-editor';
+import {MarkdownRenderer} from './markdown-renderer';
 
 @Component({
     selector: 'meeting-workspace',
     standalone: true,
-    imports: [CommonModule, FormsModule, RouterLink, NavRail],
+    imports: [CommonModule, FormsModule, RouterLink, NavRail, MarkdownEditor, MarkdownRenderer],
     templateUrl: './notes-workspace.html'
 })
 export class NotesWorkspace implements OnInit {

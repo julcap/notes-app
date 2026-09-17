@@ -109,6 +109,56 @@ describe('NotesWorkspace', () => {
         expect(component.message).toBe('All changes saved');
     });
 
+    it('persists markdown unchanged and renders the saved note', async () => {
+        fixture.detectChanges();
+        http.expectOne('/api/notes').flush([]);
+        await fixture.whenStable();
+        const content = '## Decision\n\n**Ship it**\n\n- [ ] Tell the team';
+        component.selected = null;
+        component.editing = true;
+        component.draft = {...component.blank(), title: 'Markdown note', content};
+
+        const pending = component.save();
+        const request = http.expectOne('/api/notes');
+        expect(request.request.body.content).toBe(content);
+        request.flush({...note, title: 'Markdown note', content});
+        await pending;
+        fixture.detectChanges();
+
+        const body = fixture.nativeElement.querySelector('markdown-renderer.note-body') as HTMLElement;
+        expect(body.querySelector('h2')?.textContent).toBe('Decision');
+        expect(body.querySelector('strong')?.textContent).toBe('Ship it');
+        expect(body.querySelector('[role="checkbox"]')?.getAttribute('aria-checked')).toBe('false');
+    });
+
+    it('uses the same sanitized rendering in preview and read mode', async () => {
+        const content = '## Decision\n\n**Ship it**\n\n- [x] Told the team';
+        fixture.detectChanges();
+        http.expectOne('/api/notes').flush([{...note, content}]);
+        await fixture.whenStable();
+        fixture.detectChanges();
+        const readHtml = (fixture.nativeElement.querySelector('.note-body .markdown-content') as HTMLElement).innerHTML;
+
+        component.edit();
+        fixture.detectChanges();
+        (fixture.nativeElement.querySelector('[aria-label="Preview markdown"]') as HTMLButtonElement).click();
+        fixture.detectChanges();
+        const previewHtml = (fixture.nativeElement.querySelector('.markdown-preview .markdown-content') as HTMLElement).innerHTML;
+
+        expect(previewHtml).toBe(readHtml);
+    });
+
+    it('labels the markdown textarea with the visible Notes label', async () => {
+        fixture.detectChanges();
+        http.expectOne('/api/notes').flush([]);
+        await fixture.whenStable();
+        component.create();
+        fixture.detectChanges();
+
+        const textarea = fixture.nativeElement.querySelector('markdown-editor textarea') as HTMLTextAreaElement;
+        expect(textarea.getAttribute('aria-labelledby')).toBe('content-label');
+    });
+
     it('updates a valid meeting note and preserves the draft after an HTTP error', async () => {
         component.selected = note;
         component.editing = true;
