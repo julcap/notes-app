@@ -40,7 +40,21 @@
           "options": {
             "buildTarget": "minutes:build"
           }
+        },
+        "test": {
+          "builder": "@angular/build:karma",
+          "options": {
+            "polyfills": [
+              "zone.js",
+              "zone.js/testing"
+            ],
+            "tsConfig": "tsconfig.spec.json",
+            "inlineStyleLanguage": "scss",
+            "browsers": "ChromeHeadless",
+            "codeCoverage": true
+          }
         }
       }
     }
   }
+}
