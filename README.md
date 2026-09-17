@@ -66,7 +66,10 @@ Browser → Angular served by Nginx → `/api` reverse proxy → FastAPI → Pos
 
 - `frontend/src/main.ts`: standalone Angular component and API interaction.
 - `frontend/src/app.html`, `styles.css`: responsive workspace UI.
-- `backend/app/main.py`: validated REST API and SQLAlchemy models.
+- `backend/app/main.py`: FastAPI app wiring (middleware, routers, health check).
+- `backend/app/database.py`: SQLAlchemy engine, session factory, declarative base.
+- `backend/app/auth/`: accounts, sessions and email — `models.py`/`schemas.py` (data), `security.py` (hashing, rate limiting, origin checks), `tokens.py` (JWTs, cookies, dependencies), `email.py` (SES/SMTP delivery), `routes.py` (register/login/reset/verify), `oauth.py` (Google/Facebook/Amazon).
+- `backend/app/notes/`: meeting notes and attachments — `models.py`/`schemas.py` (data), `routes.py` (CRUD + file upload/download).
 - `backend/app/init_db.py`: initial additive schema bootstrap. Future schema changes need versioned migrations; `create_all` does not migrate existing tables.
 - `compose.yaml`: local application stack; only the frontend is published, on localhost.
 - `deploy/`: EKS manifests.
