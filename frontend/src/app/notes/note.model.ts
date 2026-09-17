@@ -4,6 +4,15 @@ export interface Attachment {
     size: number;
 }
 
+export interface ActionItem {
+    id: string;
+    text: string;
+    owner_name: string;
+    due_date: string | null;
+    done: boolean;
+    created_at: string;
+}
+
 export interface Note {
     id: string;
     title: string;
@@ -12,4 +21,5 @@ export interface Note {
     meeting_date: string;
     updated_at: string;
     attachments: Attachment[];
+    action_items: ActionItem[];
 }

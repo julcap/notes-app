@@ -9,6 +9,7 @@ from .auth import SECRET, SECURE
 from .auth import router as auth_router
 from .database import Base, db, engine
 from .notes.routes import STORAGE
+from .notes.routes import action_items_router
 from .notes.routes import router as notes_router
 
 
@@ -22,6 +23,7 @@ app = FastAPI(title='Minutes API', lifespan=lifespan)
 app.add_middleware(SessionMiddleware, secret_key=SECRET, https_only=SECURE, same_site='lax', max_age=600)
 app.include_router(auth_router)
 app.include_router(notes_router)
+app.include_router(action_items_router)
 
 @app.middleware('http')
 async def private_responses(request, call_next):

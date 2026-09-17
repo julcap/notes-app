@@ -7,7 +7,7 @@ import {firstValueFrom} from 'rxjs';
 
 import {AuthService} from '../auth/auth.service';
 import {NavRail} from '../shell/nav-rail';
-import {Attachment, Note} from './note.model';
+import {ActionItem, Attachment, Note} from './note.model';
 
 @Component({
     selector: 'meeting-workspace',
@@ -29,6 +29,7 @@ export class NotesWorkspace implements OnInit {
     error = '';
     message = '';
     confirmDelete = false;
+    newActionItem = this.blankActionItem();
 
     async logout() {
         if (this.dirty && !window.confirm('Discard unsaved changes and log out?')) return;
@@ -73,6 +74,10 @@ export class NotesWorkspace implements OnInit {
         };
     }
 
+    blankActionItem() {
+        return {text: '', owner_name: '', due_date: ''};
+    }
+
     get filtered() {
         const q = this.query.trim().toLowerCase();
         return this.notes.filter(n => `${n.title} ${n.content} ${n.attendees}`.toLowerCase().includes(q));
@@ -113,6 +118,7 @@ export class NotesWorkspace implements OnInit {
         this.editing = false;
         this.confirmDelete = false;
         this.message = '';
+        this.newActionItem = this.blankActionItem();
     }
 
     create() {
@@ -207,6 +213,52 @@ export class NotesWorkspace implements OnInit {
             this.selected.attachments = this.selected.attachments.filter(x => x.id !== a.id);
         } catch {
             this.error = 'Could not remove attachment.';
+        } finally {
+            this.busy = false;
+        }
+    }
+
+    async addActionItem() {
+        if (!this.selected || !this.newActionItem.text.trim() || this.busy) return;
+        this.busy = true;
+        this.error = '';
+        const body = {
+            text: this.newActionItem.text.trim(),
+            owner_name: this.newActionItem.owner_name.trim(),
+            due_date: this.newActionItem.due_date || null
+        };
+        try {
+            const item = await firstValueFrom(this.http.post<ActionItem>(`/api/notes/${this.selected.id}/action-items`, body));
+            this.selected.action_items.push(item);
+            this.newActionItem = this.blankActionItem();
+        } catch {
+            this.error = 'Could not add the action item. Please try again.';
+        } finally {
+            this.busy = false;
+        }
+    }
+
+    async toggleActionItem(item: ActionItem) {
+        if (this.busy) return;
+        this.busy = true;
+        try {
+            const updated = await firstValueFrom(this.http.patch<ActionItem>(`/api/action-items/${item.id}`, {done: !item.done}));
+            item.done = updated.done;
+        } catch {
+            this.error = 'Could not update the action item.';
+        } finally {
+            this.busy = false;
+        }
+    }
+
+    async removeActionItem(item: ActionItem) {
+        if (!this.selected || this.busy) return;
+        this.busy = true;
+        try {
+            await firstValueFrom(this.http.delete(`/api/action-items/${item.id}`));
+            this.selected.action_items = this.selected.action_items.filter(x => x.id !== item.id);
+        } catch {
+            this.error = 'Could not remove the action item.';
         } finally {
             this.busy = false;
         }

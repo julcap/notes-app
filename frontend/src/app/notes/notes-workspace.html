@@ -116,6 +116,36 @@
                             <div *ngIf="!n.attachments.length" class="file-empty">Keep the full picture. Add documents,
                                 slides, or images.<small>Up to 20 MB per file</small></div>
                         </div>
+                        <div class="action-items">
+                            <div class="attachment-heading"><h4>Action items <span>{{ n.action_items.length }}</span></h4>
+                            </div>
+                            <div *ngFor="let item of n.action_items" class="action-item-row">
+                                <input type="checkbox" [checked]="item.done" (change)="toggleActionItem(item)"
+                                       [disabled]="busy" [attr.aria-label]="(item.done ? 'Mark not done: ' : 'Mark done: ') + item.text">
+                                <div class="action-item-body" [class.done]="item.done">
+                                    <span class="action-item-text">{{ item.text }}</span>
+                                    <span class="action-item-meta" *ngIf="item.owner_name || item.due_date">{{ item.owner_name
+                                        }}<ng-container *ngIf="item.owner_name && item.due_date"> · </ng-container>{{ item.due_date ? ('Due ' + (item.due_date | date:'MMM d')) : '' }}</span>
+                                </div>
+                                <button (click)="removeActionItem(item)" [disabled]="busy"
+                                        [attr.aria-label]="'Remove '+item.text">×
+                                </button>
+                            </div>
+                            <div *ngIf="!n.action_items.length" class="file-empty">No action items yet. Track the
+                                follow-ups below.</div>
+                            <form class="action-item-form" (ngSubmit)="addActionItem()">
+                                <input name="action-item-text" placeholder="Add an action item…"
+                                       [(ngModel)]="newActionItem.text" maxlength="500" [disabled]="busy"
+                                       aria-label="Action item text">
+                                <input name="action-item-owner" placeholder="Owner"
+                                       [(ngModel)]="newActionItem.owner_name" maxlength="200" [disabled]="busy"
+                                       aria-label="Action item owner">
+                                <input type="date" name="action-item-due" [(ngModel)]="newActionItem.due_date"
+                                       [disabled]="busy" aria-label="Action item due date">
+                                <button class="secondary" type="submit"
+                                        [disabled]="busy || !newActionItem.text.trim()">Add</button>
+                            </form>
+                        </div>
                         <footer>
                             <span>{{ message || 'Last edited ' + (n.updated_at | date:'MMM d, h:mm a') }}</span><span>{{ busy ? 'Working…' : '✓ Saved' }}</span>
                         </footer>

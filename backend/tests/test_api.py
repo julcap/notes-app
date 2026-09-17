@@ -46,3 +46,33 @@ def test_size_limit_and_removal(client):
     a=client.post(base,files={'file':('small.txt',b'yes')}).json()
     assert client.delete(base+'/'+a['id']).status_code == 204
     assert client.get(base+'/'+a['id']).status_code == 404
+
+def test_action_items_crud_and_ownership(client):
+    n = note(client)
+    base = '/api/notes/'+n['id']+'/action-items'
+    assert client.get('/api/notes/'+n['id']).json()['action_items'] == []
+    response = client.post(base, json={'text':'Send recap email','owner_name':'Alex','due_date':'2026-09-20'})
+    assert response.status_code == 201
+    item = response.json()
+    assert item['text'] == 'Send recap email' and item['owner_name'] == 'Alex' and item['due_date'] == '2026-09-20' and item['done'] is False
+    assert client.post(base, json={'text':'   '}).status_code == 422
+    minimal = client.post(base, json={'text':'Follow up'}).json()
+    assert minimal['owner_name'] == '' and minimal['due_date'] is None
+    assert [i['id'] for i in client.get('/api/notes/'+n['id']).json()['action_items']] == [item['id'], minimal['id']]
+
+    patched = client.patch('/api/action-items/'+item['id'], json={'done':True})
+    assert patched.status_code == 200 and patched.json()['done'] is True and patched.json()['text'] == 'Send recap email'
+    patched = client.patch('/api/action-items/'+item['id'], json={'text':'Send the recap email','due_date':None})
+    assert patched.json()['text'] == 'Send the recap email' and patched.json()['due_date'] is None and patched.json()['done'] is True
+    assert client.patch('/api/action-items/'+item['id'], json={'text':'  '}).status_code == 422
+
+    other = note(client, 'Other')
+    other_item = client.post('/api/notes/'+other['id']+'/action-items', json={'text':'Other task'}).json()
+    assert client.post('/api/notes/does-not-exist/action-items', json={'text':'x'}).status_code == 404
+
+    assert client.delete('/api/action-items/'+minimal['id']).status_code == 204
+    assert client.patch('/api/action-items/'+minimal['id'], json={'done':True}).status_code == 404
+
+    assert client.delete('/api/notes/'+n['id']).status_code == 204
+    assert client.patch('/api/action-items/'+item['id'], json={'done':False}).status_code == 404
+    assert client.delete('/api/action-items/'+other_item['id']).status_code == 204

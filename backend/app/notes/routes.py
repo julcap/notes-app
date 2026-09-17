@@ -9,10 +9,11 @@ from sqlalchemy.orm import Session, selectinload
 from ..auth import User, current_user, verified_user
 from ..database import db, now
 from ..storage import MAX_FILE_SIZE, STORAGE
-from .models import Attachment, Note
-from .schemas import AttachmentOut, NoteInput, NoteOut
+from .models import ActionItem, Attachment, Note
+from .schemas import ActionItemInput, ActionItemOut, ActionItemPatch, AttachmentOut, NoteInput, NoteOut
 
 router = APIRouter(prefix='/api/notes')
+action_items_router = APIRouter(prefix='/api/action-items')
 
 
 def get_note(session, note_id, user):
@@ -20,6 +21,16 @@ def get_note(session, note_id, user):
     if note is None or note.owner_id != user.id:
         raise HTTPException(404, 'Note not found')
     return note
+
+
+def get_action_item(session, item_id, user):
+    item = session.get(ActionItem, item_id)
+    if item is None:
+        raise HTTPException(404, 'Action item not found')
+    note = session.get(Note, item.note_id)
+    if note is None or note.owner_id != user.id:
+        raise HTTPException(404, 'Action item not found')
+    return item
 
 
 @router.get('', response_model=list[NoteOut])
@@ -64,6 +75,17 @@ def delete_note(note_id: str, session: Session = Depends(db), user: User = Depen
     session.commit()
     for item in ids:
         (STORAGE / item).unlink(missing_ok=True)
+
+
+@router.post('/{note_id}/action-items', response_model=ActionItemOut, status_code=201)
+def create_action_item(note_id: str, payload: ActionItemInput, session: Session = Depends(db), user: User = Depends(current_user)):
+    note = get_note(session, note_id, user)
+    item = ActionItem(note_id=note.id, **payload.model_dump())
+    session.add(item)
+    note.updated_at = now()
+    session.commit()
+    session.refresh(item)
+    return item
 
 
 @router.post('/{note_id}/attachments', response_model=AttachmentOut, status_code=201)
@@ -112,3 +134,20 @@ def delete_attachment(note_id: str, attachment_id: str, session: Session = Depen
     session.delete(item)
     session.commit()
     (STORAGE / item.id).unlink(missing_ok=True)
+
+
+@action_items_router.patch('/{item_id}', response_model=ActionItemOut)
+def update_action_item(item_id: str, payload: ActionItemPatch, session: Session = Depends(db), user: User = Depends(current_user)):
+    item = get_action_item(session, item_id, user)
+    for key, value in payload.model_dump(exclude_unset=True).items():
+        setattr(item, key, value)
+    session.commit()
+    session.refresh(item)
+    return item
+
+
+@action_items_router.delete('/{item_id}', status_code=204)
+def delete_action_item(item_id: str, session: Session = Depends(db), user: User = Depends(current_user)):
+    item = get_action_item(session, item_id, user)
+    session.delete(item)
+    session.commit()
