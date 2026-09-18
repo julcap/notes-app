@@ -1,5 +1,7 @@
 # Minutes — Meeting Notes
 
+[![CI](https://github.com/julcap/notes-app/actions/workflows/ci.yml/badge.svg)](https://github.com/julcap/notes-app/actions/workflows/ci.yml)
+
 A standalone meeting notes workspace built from `Meeting Notes App.md`: Angular frontend, Python/FastAPI backend, and PostgreSQL. Create, edit, search, and safely undo deleted notes; record meeting dates and attendees; upload, download, and remove attachments.
 
 ## Run locally
