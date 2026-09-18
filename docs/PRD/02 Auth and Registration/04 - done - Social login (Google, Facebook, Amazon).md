@@ -43,4 +43,4 @@ All three providers follow the same authorization-code flow:
 
 ## Not yet in production
 
-Facebook additionally requires Meta's app review to serve real users past a small testing allowlist, and all three providers require a live privacy policy before their consent screens can leave test mode — see [15 Legal pages](../04%20Production%20Readiness/15%20Legal%20pages%20%28privacy%20policy%20and%20ToS%29.md).
+Facebook additionally requires Meta's app review to serve real users past a small testing allowlist, and all three providers require a live privacy policy before their consent screens can leave test mode — see [15 - done - Legal pages](../04%20Production%20Readiness/15%20-%20done%20-%20Legal%20pages%20%28privacy%20policy%20and%20ToS%29.md).

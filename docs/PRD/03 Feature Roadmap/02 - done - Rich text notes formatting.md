@@ -39,4 +39,4 @@ Implemented with focused `MarkdownEditor` and `MarkdownRenderer` components back
 ## Out of scope
 
 - A full WYSIWYG editor — a toolbar-over-textarea is enough for v1.
-- Collaborative/simultaneous editing — not needed until [09 Sharing and collaboration](./09%20Sharing%20and%20collaboration.md) exists.
+- Collaborative/simultaneous editing — not needed until [09 - done - Sharing and collaboration](./09%20-%20done%20-%20Sharing%20and%20collaboration.md) exists.

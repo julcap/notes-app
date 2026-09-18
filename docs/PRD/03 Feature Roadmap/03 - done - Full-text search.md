@@ -31,5 +31,5 @@ The current search is `ILIKE '%term%'` across title/content/attendees (`backend/
 
 ## Out of scope
 
-- Pagination of search results — see [04 Pagination](./04%20Pagination.md).
+- Pagination of search results — see [04 - done - Pagination](./04%20-%20done%20-%20Pagination.md).
 - Fuzzy/typo-tolerant search — not requested, would need `pg_trgm` or similar.

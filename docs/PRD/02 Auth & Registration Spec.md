@@ -8,7 +8,7 @@ Adds user registration, email/password authentication, forgot-password recovery,
 
 Before this spec, the app had no concept of a user: any visitor could see, create and delete all meetings. This work adds accounts so meetings belong to the person who created them, plus four ways to sign in.
 
-**Out of scope for this spec** (tracked in the Feature Roadmap folder instead): sharing a meeting with other users / team workspaces, roles or permissions beyond "owner" — see [09 Sharing and collaboration](./03%20Feature%20Roadmap/09%20Sharing%20and%20collaboration.md).
+**Out of scope for this spec** (tracked in the Feature Roadmap folder instead): sharing a meeting with other users / team workspaces, roles or permissions beyond "owner" — see [09 - done - Sharing and collaboration](./03%20Feature%20Roadmap/09%20-%20done%20-%20Sharing%20and%20collaboration.md).
 
 ## Status: all in-scope items shipped
 

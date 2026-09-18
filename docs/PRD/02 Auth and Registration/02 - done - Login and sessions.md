@@ -31,4 +31,4 @@
 
 ## Not built
 
-- A UI for viewing/revoking individual sessions — see [14 Session management UI](../04%20Production%20Readiness/14%20Session%20management%20UI.md) in the Production Readiness folder; the `refresh_tokens` table would need device/IP/last-used metadata added to support it.
+- A UI for viewing/revoking individual sessions — see [14 - done - Session management UI](../04%20Production%20Readiness/14%20-%20done%20-%20Session%20management%20UI.md) in the Production Readiness folder; the `refresh_tokens` table would need device/IP/last-used metadata added to support it.

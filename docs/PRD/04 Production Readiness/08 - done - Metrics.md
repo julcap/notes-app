@@ -22,3 +22,7 @@ To enable a deployment, an operator must first store a non-empty `metrics-token`
 ## Not covered by this file
 
 Installing or operating Prometheus, creating dashboards, and delivering alerts to a human remain environment/operator work. Tested thresholds and receiver templates are code-complete in [09 - done - Alerting](./09%20-%20done%20-%20Alerting.md), but live activation and confirmed receipt remain operator-gated.
+
+## Fixed 2026-09-18: test harness gap
+
+`backend/tests/test_metrics.py::test_public_frontend_denies_metrics_and_backend_configuration_is_private` was silently failing in every run, local and CI, with a `FileNotFoundError` rather than actually asserting anything: it computes the repo root as `Path(__file__).resolve().parents[2]`, which resolves to `/` inside the test container since `compose.test.yaml`'s `tests` service builds only from `./backend`, and `frontend/nginx.conf` was never mounted there. Fixed by adding explicit read-only volume mounts in `compose.test.yaml` for the specific repo-root files that test reads (`frontend/nginx.conf`, `deploy/ingress.yaml`, `deploy/app.yaml`, `compose.yaml`, `.github/workflows/ci.yaml`), at the container-root paths the existing path logic already expects — no change to the test itself or the backend build context. The full backend suite now passes 106/106; this test's nginx/ingress/bearer-token assertions actually run instead of erroring out before reaching them.

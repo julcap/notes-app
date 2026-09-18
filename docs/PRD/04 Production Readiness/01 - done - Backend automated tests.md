@@ -18,7 +18,7 @@
 
 ## Enforcement
 
-Gated in CI — see [10 - done - CI pipeline and deploy](./10%20-%20done%20-%20CI%20pipeline%20and%20deploy.md): `.github/workflows/ci.yaml`'s `test` job runs this suite on every PR and on push to `main`, and `deploy` only runs if `test` passes.
+Gated in CI — see [10 - done - CI pipeline and deploy](./10%20-%20done%20-%20CI%20pipeline%20and%20deploy.md): `.github/workflows/ci.yaml`'s `test` job runs this suite on every PR and on push to `main`, and `deploy` only runs if `test` passes. A `compose.test.yaml` volume-mount gap that made one metrics test silently error out instead of asserting anything was fixed 2026-09-18 — see [08 - done - Metrics](./08%20-%20done%20-%20Metrics.md#fixed-2026-09-18-test-harness-gap). Full suite: 106/106 passing.
 
 ## Not covered by this file
 

@@ -37,4 +37,4 @@ The API already accepts `skip`/`limit` params conceptually, but the frontend's m
 
 ## Out of scope
 
-- Full-text ranking of paginated results — see [03 Full-text search](./03%20Full-text%20search.md); the two are easy to combine but each is independently shippable.
+- Full-text ranking of paginated results — see [03 - done - Full-text search](./03%20-%20done%20-%20Full-text%20search.md); the two are easy to combine but each is independently shippable.

@@ -35,4 +35,4 @@ A dedicated "Account" page where a logged-in user can view, update, and delete t
 
 ## Explicitly out of scope
 
-Sharing a meeting with other users, and roles/permissions beyond "owner" — tracked separately as [09 Sharing and collaboration](../03%20Feature%20Roadmap/09%20Sharing%20and%20collaboration.md) in the Feature Roadmap folder.
+Sharing a meeting with other users, and roles/permissions beyond "owner" — tracked separately as [09 - done - Sharing and collaboration](../03%20Feature%20Roadmap/09%20-%20done%20-%20Sharing%20and%20collaboration.md) in the Feature Roadmap folder.

@@ -16,7 +16,7 @@ Unlike the feature roadmap, most of these aren't optional or sequenced by user v
 - **Would block launch entirely:** app-wide rate limiting, legal pages (blocks social login leaving test mode)
 - **Would erode trust once discovered:** session management UI
 
-The import audit corrected the baseline to 4 of 15 completed items: backend tests, health checks, CI/deploy code, and secrets management. All 15 repository items are now code-complete, including public privacy and terms drafts. Live provider activation, public deployment, operator/contact details, legal approval, and OAuth production review remain external gates; repository completion does not imply those gates are cleared.
+The import audit corrected the baseline to 4 of 15 completed items: backend tests, health checks, CI/deploy code, and secrets management. All 15 repository items are now code-complete, including public privacy and terms drafts. A test-harness gap that made one metrics/nginx-privacy test silently no-op was fixed 2026-09-18 (see item 8), and Sentry's scrubbed-ingestion pipeline was live-verified locally the same day (see item 6). Live provider activation, public deployment, operator/contact details, legal approval, and OAuth production review remain external gates; repository completion does not imply those gates are cleared.
 
 ## Items, in the original doc's section order
 
@@ -25,7 +25,7 @@ The import audit corrected the baseline to 4 of 15 completed items: backend test
 3. ✅ [Object storage for attachments](./04%20Production%20Readiness/03%20-%20done%20-%20Object%20storage%20for%20attachments.md) — code-complete with local/S3 backends and verified migration; live bucket, IAM, and cutover remain operator-gated
 4. ✅ [Database migrations (Alembic)](./04%20Production%20Readiness/04%20-%20done%20-%20Database%20migrations%20%28Alembic%29.md) — code-complete; validated adoption rejects unknown drift and preserves known ownerless legacy rows
 5. ✅ [Structured logging](./04%20Production%20Readiness/05%20-%20done%20-%20Structured%20logging.md) — code-complete with redacted JSON request/error records and an identifier-free auth-event trail
-6. ✅ [Error tracking (Sentry)](./04%20Production%20Readiness/06%20-%20done%20-%20Error%20tracking%20%28Sentry%29.md) — code-complete and disabled by default; live scrubbed ingestion remains operator-gated
+6. ✅ [Error tracking (Sentry)](./04%20Production%20Readiness/06%20-%20done%20-%20Error%20tracking%20%28Sentry%29.md) — code-complete and disabled by default; local live scrubbed ingestion verified 2026-09-18, production DSN activation remains operator-gated
 7. ✅ [Health checks](./04%20Production%20Readiness/07%20-%20done%20-%20Health%20checks.md)
 8. ✅ [Metrics](./04%20Production%20Readiness/08%20-%20done%20-%20Metrics.md) — code-complete and disabled by default; live private scraping remains operator-gated
 9. ✅ [Alerting](./04%20Production%20Readiness/09%20-%20done%20-%20Alerting.md) — code-complete with deterministic Prometheus rule tests and an out-of-band Alertmanager receiver; live monitoring deployment and confirmed human firing/resolved receipts remain operator-gated
