@@ -8,6 +8,7 @@ import {AuthService} from '../auth/auth.service';
 import {errorText} from '../auth/error-text';
 import {validPassword} from '../auth/password-policy';
 import {NavRail} from '../shell/nav-rail';
+import {AccountSession} from './session.model';
 
 @Component({
     selector: 'account-page',
@@ -44,6 +45,10 @@ export class Account implements OnInit {
     disablePassword = '';
     disableCode = '';
 
+    sessions: AccountSession[] = [];
+    sessionsLoading = true;
+    sessionsError = '';
+
     confirmDelete = false;
     deletePassword = '';
     deleteConfirmation = '';
@@ -55,6 +60,7 @@ export class Account implements OnInit {
     ngOnInit() {
         this.sync();
         this.notificationPreferencesReady = this.loadNotificationPreferences();
+        void this.loadSessions();
     }
 
     private sync() {
@@ -121,14 +127,67 @@ export class Account implements OnInit {
     changePassword() {
         return this.run(async () => {
             if (!this.validNewPassword || this.newPassword !== this.newPasswordConfirmation) throw new Error('Use a password meeting the policy and matching confirmation.');
-            await this.auth.action('change-password', {
+            const result = await this.auth.action('change-password', {
                 current_password: this.currentPassword,
                 password: this.newPassword,
                 password_confirmation: this.newPasswordConfirmation
             });
             this.currentPassword = this.newPassword = this.newPasswordConfirmation = '';
-            return 'Password updated.';
+            await this.loadSessions();
+            return result.message || 'Password updated. Other sessions were signed out.';
         });
+    }
+
+    async loadSessions() {
+        this.sessionsLoading = true;
+        this.sessionsError = '';
+        try {
+            const sessions = await this.auth.call('GET', 'sessions');
+            this.sessions = Array.isArray(sessions) ? sessions : [];
+        } catch (e) {
+            this.sessionsError = errorText(e);
+        } finally {
+            this.sessionsLoading = false;
+        }
+    }
+
+    async revokeSession(target: AccountSession) {
+        const label = target.current ? 'this session' : 'this device session';
+        if (!window.confirm(`Revoke ${label}?${target.current ? ' You will be signed out.' : ''}`)) return;
+        if (this.busy) return;
+        this.busy = true;
+        this.error = '';
+        this.message = '';
+        try {
+            await this.auth.call('DELETE', `sessions/${target.id}`);
+            if (target.current) {
+                this.auth.clear();
+                await this.router.navigateByUrl('/login');
+                return;
+            }
+            await this.loadSessions();
+            this.message = 'Session revoked.';
+        } catch (e) {
+            this.error = errorText(e);
+        } finally {
+            this.busy = false;
+        }
+    }
+
+    async logoutEverywhere() {
+        if (!window.confirm('Log out every active session, including this one?')) return;
+        if (this.busy) return;
+        this.busy = true;
+        this.error = '';
+        try {
+            await this.auth.call('POST', 'logout-all');
+            this.auth.clear();
+            await this.router.navigateByUrl('/login');
+        } catch (e) {
+            this.error = errorText(e);
+        } finally {
+            this.busy = false;
+        }
     }
 
     startEnable2fa() {

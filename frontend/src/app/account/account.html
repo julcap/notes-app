@@ -123,6 +123,35 @@
                 </ng-container>
             </section>
 
+            <section class="card" aria-labelledby="active-sessions-heading">
+                <h2 id="active-sessions-heading">Active sessions</h2>
+                <p>Review devices signed in to your account. Device and IP details are approximate.</p>
+                <p *ngIf="sessionsLoading" role="status">Loading active sessions…</p>
+                <div *ngIf="sessionsError" class="alert" role="alert">
+                    {{ sessionsError }}
+                    <button class="text-btn" type="button" (click)="loadSessions()">Try again</button>
+                </div>
+                <p *ngIf="!sessionsLoading && !sessionsError && !sessions.length">No active sessions.</p>
+                <ul class="session-list" *ngIf="!sessionsLoading && sessions.length">
+                    <li *ngFor="let session of sessions" class="session-item">
+                        <div>
+                            <h3>{{ session.user_agent || 'Unknown device' }}
+                                <span class="badge" *ngIf="session.current">Current session</span>
+                            </h3>
+                            <p>IP: {{ session.ip_address || 'Unknown' }}</p>
+                            <p>Last used: {{ session.last_used_at ? (session.last_used_at | date:'medium') : 'Unknown' }}</p>
+                            <p>Started: {{ session.created_at ? (session.created_at | date:'medium') : 'Unknown (legacy session)' }}</p>
+                        </div>
+                        <button class="text-btn danger" type="button" (click)="revokeSession(session)"
+                                [disabled]="busy">
+                            {{ session.current ? 'Log out this session' : 'Revoke session' }}
+                        </button>
+                    </li>
+                </ul>
+                <button class="secondary danger" type="button" (click)="logoutEverywhere()"
+                        [disabled]="busy || sessionsLoading">Log out everywhere</button>
+            </section>
+
             <section class="card">
                 <h2 class="danger">Danger zone</h2>
                 <p>Permanently delete your account and everything it owns. This cannot be undone.</p>

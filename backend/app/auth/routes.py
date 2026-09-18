@@ -12,13 +12,13 @@ from ..notes.permissions import lock_account
 from ..observability import log_auth_event
 from ..storage import FILE_CLEANUP_LOCK_ID, storage
 from . import totp
-from .config import APP_URL, SECURE
+from .config import APP_URL
 from .email import deliver_email, email_link
 from .models import BackupCode, EmailToken, Identity, RefreshToken, User
 from .router import router
-from .schemas import ChangePassword, DeleteAccount, EmailInput, Login, Login2FA, NotificationPreferences, ProfileUpdate, Registration, Reset, TokenInput, TotpCode, TotpDisable
+from .schemas import ChangePassword, DeleteAccount, EmailInput, Login, Login2FA, NotificationPreferences, ProfileUpdate, Registration, Reset, SessionInfo, TokenInput, TotpCode, TotpDisable
 from .security import DUMMY_HASH, check_password, digest, limit, password_hash, same_origin
-from .tokens import access, consume, consume_mfa, cookie, current_user, issue, mfa_challenge, profile, refresh_row
+from .tokens import access, clear_cookies, consume, consume_mfa, cookie, current_user, issue, mfa_challenge, profile, refresh_row, touch_session
 
 
 def quarantine_files(keys):
@@ -47,7 +47,7 @@ def register(data: Registration, request: Request, response: Response, tasks: Ba
     session.add(user)
     session.flush()
     email_link(session, user, 'verify', tasks)
-    return issue(user, response, session, data.remember)
+    return issue(user, response, session, request, data.remember)
 
 
 @router.post('/login', dependencies=[Depends(same_origin)])
@@ -65,7 +65,7 @@ def login(data: Login, request: Request, response: Response, session: Session = 
         raise HTTPException(401, 'Email or password is incorrect.')
     if user.totp_enabled:
         return {'mfa_required': True, 'mfa_token': mfa_challenge(user, data.remember)}
-    result = issue(user, response, session, data.remember)
+    result = issue(user, response, session, request, data.remember)
     log_auth_event('login', 'success', 'password')
     return result
 
@@ -81,7 +81,7 @@ def login_2fa(data: Login2FA, request: Request, response: Response, session: Ses
     if not verify_totp_or_backup_code(session, user, data.code):
         log_auth_event('login', 'failure', 'two_factor')
         raise HTTPException(401, 'Invalid code.')
-    result = issue(user, response, session, remember)
+    result = issue(user, response, session, request, remember)
     log_auth_event('login', 'success', 'two_factor')
     return result
 
@@ -93,6 +93,11 @@ def refresh(request: Request, response: Response, session: Session = Depends(db)
     row.token_hash = digest(raw)
     row.csrf_hash = digest(csrf)
     user = session.get(User, row.user_id)
+    if not user or row.token_version != user.token_version:
+        row.revoked_at = now()
+        session.commit()
+        raise HTTPException(401, 'Session expired. Please sign in again.')
+    touch_session(row, request)
     session.commit()
     cookie(response, raw, csrf, row)
     return {'access_token': access(user, row.id), 'token_type': 'bearer', 'user': profile(user)}
@@ -103,9 +108,65 @@ def logout(request: Request, response: Response, session: Session = Depends(db))
     row = refresh_row(request, session)
     row.revoked_at = now()
     session.commit()
-    response.delete_cookie('minutes_refresh', path='/api/auth', secure=SECURE, httponly=True, samesite='lax')
-    response.delete_cookie('minutes_csrf', path='/', secure=SECURE, samesite='lax')
+    clear_cookies(response)
     return {'message': 'Signed out'}
+
+
+def session_info(row, current_id):
+    return {
+        'id': row.id,
+        'current': row.id == current_id,
+        'user_agent': row.user_agent,
+        'ip_address': row.ip_address,
+        'created_at': row.created_at,
+        'last_used_at': row.last_used_at,
+        'expires_at': row.expires_at,
+    }
+
+
+@router.get('/sessions', response_model=list[SessionInfo])
+def sessions(request: Request, user: User = Depends(current_user), session: Session = Depends(db)):
+    rows = session.scalars(
+        select(RefreshToken)
+        .where(
+            RefreshToken.user_id == user.id,
+            RefreshToken.token_version == user.token_version,
+            RefreshToken.revoked_at.is_(None),
+            RefreshToken.expires_at > now(),
+        )
+        .order_by(RefreshToken.last_used_at.desc().nullslast(), RefreshToken.id.desc())
+    ).all()
+    return [session_info(row, request.state.session_id) for row in rows]
+
+
+@router.delete('/sessions/{session_id}', dependencies=[Depends(same_origin)])
+def revoke_session(session_id: int, request: Request, response: Response, user: User = Depends(current_user), session: Session = Depends(db)):
+    row = session.scalar(
+        select(RefreshToken)
+        .where(RefreshToken.id == session_id, RefreshToken.user_id == user.id)
+        .with_for_update()
+    )
+    if not row:
+        raise HTTPException(404, 'Session not found.')
+    row.revoked_at = now()
+    session.commit()
+    if row.id == request.state.session_id:
+        clear_cookies(response)
+    return {'message': 'Session revoked.'}
+
+
+@router.post('/logout-all', dependencies=[Depends(same_origin)])
+def logout_all(response: Response, user: User = Depends(current_user), session: Session = Depends(db)):
+    timestamp = now()
+    user.token_version += 1
+    session.execute(
+        update(RefreshToken)
+        .where(RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None))
+        .values(revoked_at=timestamp)
+    )
+    session.commit()
+    clear_cookies(response)
+    return {'message': 'Signed out everywhere.'}
 
 
 @router.get('/me')
@@ -186,7 +247,7 @@ def verify(data: TokenInput, request: Request, response: Response, session: Sess
         user.email = new_email
         user.pending_email = None
         session.commit()
-        return issue(user, response, session)
+        return issue(user, response, session, request)
     session.execute(text('SELECT pg_advisory_xact_lock(hashtext(:email))'), {'email': user.email})
     # A provider without verified-email claims must prove mailbox control before an automatic merge.
     target = session.scalar(select(User).where(User.email == user.email, User.email_verified.is_(True), User.id != user.id).order_by(User.id)) if user.auth_provider != 'local' else None
@@ -197,7 +258,7 @@ def verify(data: TokenInput, request: Request, response: Response, session: Sess
         user = target
     user.email_verified = True
     session.commit()
-    return issue(user, response, session)
+    return issue(user, response, session, request)
 
 
 @router.put('/me', dependencies=[Depends(same_origin)])
@@ -225,8 +286,28 @@ def change_password(data: ChangePassword, request: Request, user: User = Depends
     if not check_password(data.current_password, user.password_hash):
         raise HTTPException(401, 'Current password is incorrect.')
     user.password_hash = password_hash(data.password)
+    user.token_version += 1
+    session.execute(
+        update(RefreshToken)
+        .where(
+            RefreshToken.user_id == user.id,
+            RefreshToken.id != request.state.session_id,
+            RefreshToken.revoked_at.is_(None),
+        )
+        .values(revoked_at=now())
+    )
+    session.execute(
+        update(RefreshToken)
+        .where(RefreshToken.id == request.state.session_id)
+        .values(token_version=user.token_version)
+    )
     session.commit()
-    return {'message': 'Password updated.'}
+    return {
+        'message': 'Password updated. Other sessions were signed out.',
+        'access_token': access(user, request.state.session_id),
+        'token_type': 'bearer',
+        'user': profile(user),
+    }
 
 
 @router.delete('/me', dependencies=[Depends(same_origin)])
@@ -268,8 +349,7 @@ def delete_account(data: DeleteAccount, request: Request, response: Response, us
         try_reconcile_quarantine()
         raise
     storage.discard(quarantined)
-    response.delete_cookie('minutes_refresh', path='/api/auth', secure=SECURE, httponly=True, samesite='lax')
-    response.delete_cookie('minutes_csrf', path='/', secure=SECURE, samesite='lax')
+    clear_cookies(response)
     return {'message': 'Your account and everything it owns have been deleted.'}
 
 

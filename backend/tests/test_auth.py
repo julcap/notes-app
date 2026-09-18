@@ -7,6 +7,7 @@ from fastapi import BackgroundTasks
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from app import auth
+from app.auth.tokens import access
 from app.database import SessionLocal, now
 from app.jobs import purge_deleted
 from app.notes.models import Note
@@ -300,3 +301,156 @@ def test_delete_account_queues_failed_final_file_removal(client, monkeypatch):
     monkeypatch.setattr(Path,'unlink',original_unlink)
     assert purge_deleted()==0
     assert not trash_path.exists()
+
+
+def test_sessions_list_rotation_and_single_revocation(client):
+    current_access = client.headers['Authorization'].removeprefix('Bearer ')
+    response = client.get('/api/auth/sessions')
+    assert response.status_code == 200, response.text
+    sessions = response.json()
+    assert len(sessions) == 2
+    assert sum(item['current'] for item in sessions) == 1
+    assert all(item['user_agent'] == 'testclient' for item in sessions)
+    assert all(item['ip_address'] == 'testclient' for item in sessions)
+    assert all(item['created_at'] and item['last_used_at'] for item in sessions)
+    assert all('token_hash' not in item and 'csrf_hash' not in item for item in sessions)
+
+    current = next(item for item in sessions if item['current'])
+    other = next(item for item in sessions if not item['current'])
+    previous_last_used = current['last_used_at']
+    with SessionLocal() as db:
+        user = db.scalar(select(auth.User).where(auth.User.email == 'test@example.com'))
+        other_access = access(user, other['id'])
+
+    client.headers['user-agent'] = 'Second Browser/2.0'
+    refreshed = client.post(
+        '/api/auth/refresh',
+        headers={**csrf(client), 'x-forwarded-for': '203.0.113.77'},
+    )
+    assert refreshed.status_code == 200, refreshed.text
+    client.headers['Authorization'] = 'Bearer ' + refreshed.json()['access_token']
+    rotated = client.get('/api/auth/sessions').json()
+    rotated_current = next(item for item in rotated if item['current'])
+    assert rotated_current['id'] == current['id']
+    assert rotated_current['last_used_at'] >= previous_last_used
+    assert rotated_current['user_agent'] == 'Second Browser/2.0'
+    assert rotated_current['ip_address'] == 'testclient'
+
+    assert client.delete(f"/api/auth/sessions/{other['id']}").status_code == 200
+    client.headers['Authorization'] = 'Bearer ' + other_access
+    assert client.get('/api/auth/me').status_code == 401
+    client.headers['Authorization'] = 'Bearer ' + refreshed.json()['access_token']
+    assert [item['id'] for item in client.get('/api/auth/sessions').json()] == [current['id']]
+
+    assert client.delete(f"/api/auth/sessions/{current['id']}").status_code == 200
+    client.headers['Authorization'] = 'Bearer ' + current_access
+    assert client.get('/api/auth/me').status_code == 401
+    assert client.cookies.get('minutes_refresh') is None
+
+
+def test_sessions_hide_expired_and_cross_user_rows(client):
+    with SessionLocal() as db:
+        owner = db.scalar(select(auth.User).where(auth.User.email == 'test@example.com'))
+        stranger = auth.User(
+            email='stranger@example.com',
+            password_hash='not-used',
+            auth_provider='local',
+        )
+        db.add(stranger)
+        db.flush()
+        foreign = auth.RefreshToken(
+            user_id=stranger.id,
+            token_hash='foreign-token',
+            csrf_hash='foreign-csrf',
+            remember=False,
+            expires_at=now() + timedelta(hours=1),
+            created_at=now(),
+            last_used_at=now(),
+        )
+        expired = auth.RefreshToken(
+            user_id=owner.id,
+            token_hash='expired-token',
+            csrf_hash='expired-csrf',
+            remember=False,
+            expires_at=now() - timedelta(seconds=1),
+            created_at=now() - timedelta(hours=1),
+            last_used_at=now() - timedelta(hours=1),
+        )
+        stale_generation = auth.RefreshToken(
+            user_id=owner.id,
+            token_hash='stale-generation-token',
+            csrf_hash='stale-generation-csrf',
+            remember=False,
+            token_version=owner.token_version - 1,
+            expires_at=now() + timedelta(hours=1),
+            created_at=now(),
+            last_used_at=now(),
+        )
+        db.add_all([foreign, expired, stale_generation])
+        db.commit()
+        foreign_id, expired_id, stale_id = foreign.id, expired.id, stale_generation.id
+
+    listed_ids = {item['id'] for item in client.get('/api/auth/sessions').json()}
+    assert foreign_id not in listed_ids
+    assert expired_id not in listed_ids
+    assert stale_id not in listed_ids
+    assert client.delete(f'/api/auth/sessions/{foreign_id}').status_code == 404
+
+
+def test_logout_all_revokes_sessions_and_access_tokens(client):
+    access_token = client.headers['Authorization'].removeprefix('Bearer ')
+    with SessionLocal() as db:
+        user = db.scalar(select(auth.User).where(auth.User.email == 'test@example.com'))
+        previous_version = user.token_version
+
+    response = client.post('/api/auth/logout-all')
+    assert response.status_code == 200, response.text
+    assert client.cookies.get('minutes_refresh') is None
+    assert client.get('/api/auth/me').status_code == 401
+    with SessionLocal() as db:
+        user = db.scalar(select(auth.User).where(auth.User.email == 'test@example.com'))
+        rows = db.scalars(select(auth.RefreshToken).where(auth.RefreshToken.user_id == user.id)).all()
+        assert user.token_version == previous_version + 1
+        assert rows and all(row.revoked_at is not None for row in rows)
+
+    client.headers['Authorization'] = 'Bearer ' + access_token
+    assert client.get('/api/auth/me').status_code == 401
+
+
+def test_change_password_revokes_other_sessions_and_refreshes_current_access(client):
+    old_current_access = client.headers['Authorization'].removeprefix('Bearer ')
+    sessions = client.get('/api/auth/sessions').json()
+    current_id = next(item['id'] for item in sessions if item['current'])
+    other_id = next(item['id'] for item in sessions if not item['current'])
+    with SessionLocal() as db:
+        user = db.scalar(select(auth.User).where(auth.User.email == 'test@example.com'))
+        other_access = access(user, other_id)
+
+    payload = {
+        'current_password': 'SafePassword123',
+        'password': 'NewPassword123',
+        'password_confirmation': 'NewPassword123',
+    }
+    response = client.post('/api/auth/change-password', json=payload)
+    assert response.status_code == 200, response.text
+    new_access = response.json()['access_token']
+
+    client.headers['Authorization'] = 'Bearer ' + old_current_access
+    assert client.get('/api/auth/me').status_code == 401
+    client.headers['Authorization'] = 'Bearer ' + other_access
+    assert client.get('/api/auth/me').status_code == 401
+    client.headers['Authorization'] = 'Bearer ' + new_access
+    assert client.get('/api/auth/me').status_code == 200
+    listed = client.get('/api/auth/sessions').json()
+    assert [item['id'] for item in listed] == [current_id]
+
+
+def test_refresh_rejects_a_session_from_an_older_token_version(client):
+    with SessionLocal() as db:
+        user = db.scalar(select(auth.User).where(auth.User.email == 'test@example.com'))
+        user.token_version += 1
+        db.commit()
+
+    response = client.post('/api/auth/refresh', headers=csrf(client))
+
+    assert response.status_code == 401

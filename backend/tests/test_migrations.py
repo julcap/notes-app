@@ -61,7 +61,7 @@ def test_empty_database_upgrade_creates_current_schema():
     assert 'ix_auth_rate_limits_expires_at' in {
         index['name'] for index in schema.get_indexes('auth_rate_limits')
     }
-    assert revision(database) == '20260918_0008'
+    assert revision(database) == '20260918_0009'
     database.dispose()
 
 
@@ -99,7 +99,7 @@ def test_current_schema_adoption_preserves_populated_rows():
         assert connection.execute(text('SELECT title FROM notes')).scalar_one() == 'Kept note'
         assert connection.execute(text('SELECT filename FROM attachments')).scalar_one() == 'kept.txt'
         assert connection.execute(text('SELECT text FROM action_items')).scalar_one() == 'Keep this'
-    assert revision(database) == '20260918_0008'
+    assert revision(database) == '20260918_0009'
     database.dispose()
 
 
@@ -154,7 +154,7 @@ def test_known_ownerless_legacy_schema_is_migrated_without_claiming_notes():
                     INSERT INTO notes (id, owner_id, title, content, attendees, meeting_date, created_at, updated_at)
                     VALUES ('new-ownerless', NULL, 'Rejected', '', '', current_date, now(), now())
                 """))
-    assert revision(database) == '20260918_0008'
+    assert revision(database) == '20260918_0009'
     database.dispose()
 
 
@@ -178,7 +178,7 @@ def test_repeated_upgrade_is_a_no_op():
     upgrade_database(DATABASE_URL)
 
     database = create_engine(DATABASE_URL)
-    assert revision(database) == '20260918_0008'
+    assert revision(database) == '20260918_0009'
     database.dispose()
 
 
@@ -223,7 +223,7 @@ def test_full_text_search_migration_downgrade_and_upgrade_round_trip():
     command.upgrade(migration_config(), 'head')
     assert 'search_vector' in {column['name'] for column in inspect(database).get_columns('notes')}
     assert 'ix_notes_search_vector' in {index['name'] for index in inspect(database).get_indexes('notes')}
-    assert revision(database) == '20260918_0008'
+    assert revision(database) == '20260918_0009'
     database.dispose()
 
 
@@ -238,7 +238,7 @@ def test_soft_delete_migration_adds_nullable_timezone_column_and_index():
     assert deleted_at['nullable'] is True
     assert deleted_at['type'].timezone is True
     assert 'ix_notes_deleted_at' in indexes
-    assert revision(database) == '20260918_0008'
+    assert revision(database) == '20260918_0009'
     database.dispose()
 
 
@@ -279,7 +279,7 @@ def test_attachment_content_type_migration_defaults_legacy_rows():
         )).scalar_one()
     assert content_type['nullable'] is False
     assert legacy_type == 'application/octet-stream'
-    assert revision(database) == '20260918_0008'
+    assert revision(database) == '20260918_0009'
     database.dispose()
 
 
@@ -303,7 +303,7 @@ def test_concurrent_upgrade_is_serialized():
     assert [process.returncode for process in processes] == [0, 0], results
     assert all('Traceback' not in stderr for _, stderr in results)
     database = create_engine(DATABASE_URL)
-    assert revision(database) == '20260918_0008'
+    assert revision(database) == '20260918_0009'
     assert 'notes' in inspect(database).get_table_names()
     database.dispose()
 
@@ -328,7 +328,7 @@ def test_notification_migration_adds_preferences_schedule_and_delivery_keys():
     assert note_columns['scheduled_at']['type'].timezone is True
     assert delivery_columns['delivery_key']['nullable'] is False
     assert any(item['column_names'] == ['delivery_key'] for item in delivery_uniques)
-    assert revision(database) == '20260918_0008'
+    assert revision(database) == '20260918_0009'
     database.dispose()
 
 
@@ -351,7 +351,7 @@ def test_sharing_migration_has_permissions_uniqueness_and_cascading_foreign_keys
     assert all(item['options'].get('ondelete') == 'CASCADE' for item in share_foreign_keys)
     assert any(item['column_names'] == ['owner_id', 'user_id'] for item in contact_uniques)
     assert all(item['options'].get('ondelete') == 'CASCADE' for item in contact_foreign_keys)
-    assert revision(database) == '20260918_0008'
+    assert revision(database) == '20260918_0009'
     database.dispose()
 
 
@@ -396,5 +396,63 @@ def test_attachment_object_key_migration_preserves_legacy_rows():
         )).scalar_one_or_none()
     assert columns['object_key']['nullable'] is True
     assert object_key is None
-    assert revision(database) == '20260918_0008'
+    assert revision(database) == '20260918_0009'
+    database.dispose()
+
+
+def test_session_metadata_migration_adds_bounded_timezone_columns():
+    reset_database()
+    database = create_engine(DATABASE_URL)
+    command.upgrade(migration_config(), '20260918_0008')
+    with database.begin() as connection:
+        user_id = connection.execute(text("""
+            INSERT INTO users (
+                email, pending_email, password_hash, email_verified, display_name,
+                auth_provider, token_version, totp_secret, totp_enabled,
+                reminders_enabled, digest_enabled, reminder_lead_minutes,
+                created_at, updated_at
+            ) VALUES (
+                'session-migration@example.com', NULL, 'hash', true, 'Session migration',
+                'local', 7, NULL, false, false, false, 10, now(), now()
+            ) RETURNING id
+        """)).scalar_one()
+        connection.execute(text("""
+            INSERT INTO refresh_tokens (
+                user_id, token_hash, csrf_hash, remember, expires_at, revoked_at
+            ) VALUES (
+                :user_id, 'legacy-session-token', 'legacy-session-csrf',
+                false, now() + interval '1 hour', NULL
+            )
+        """), {'user_id': user_id})
+
+    command.upgrade(migration_config(), 'head')
+
+    columns = {column['name']: column for column in inspect(database).get_columns('refresh_tokens')}
+    with database.begin() as connection:
+        legacy_version = connection.execute(text("""
+            SELECT token_version
+            FROM refresh_tokens
+            WHERE token_hash = 'legacy-session-token'
+        """)).scalar_one()
+        old_backend_version = connection.execute(text("""
+            INSERT INTO refresh_tokens (
+                user_id, token_hash, csrf_hash, remember, expires_at, revoked_at
+            ) VALUES (
+                :user_id, 'old-backend-session-token', 'old-backend-session-csrf',
+                false, now() + interval '1 hour', NULL
+            )
+            RETURNING token_version
+        """), {'user_id': user_id}).scalar_one()
+
+    assert columns['user_agent']['type'].length == 512
+    assert columns['ip_address']['type'].length == 45
+    assert columns['token_version']['nullable'] is False
+    assert columns['created_at']['type'].timezone is True
+    assert columns['last_used_at']['type'].timezone is True
+    assert all(columns[name]['nullable'] is True for name in (
+        'user_agent', 'ip_address', 'created_at', 'last_used_at'
+    ))
+    assert legacy_version == 7
+    assert old_backend_version == 7
+    assert revision(database) == '20260918_0009'
     database.dispose()

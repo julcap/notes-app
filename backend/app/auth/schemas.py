@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel, EmailStr, Field, model_validator
 
 from .security import validate_password
@@ -80,3 +82,13 @@ class NotificationPreferences(BaseModel):
     reminders_enabled: bool = False
     digest_enabled: bool = False
     reminder_lead_minutes: int = Field(default=10, ge=1, le=1440)
+
+
+class SessionInfo(BaseModel):
+    id: int
+    current: bool
+    user_agent: str | None
+    ip_address: str | None
+    created_at: datetime | None
+    last_used_at: datetime | None
+    expires_at: datetime
