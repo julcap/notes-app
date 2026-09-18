@@ -21,6 +21,14 @@ services:
       DATABASE_URL: postgresql+psycopg://test:test@test-database:5432/minutes_test
     volumes:
       - ./backend/tests:/app/tests:ro
+      # test_metrics.py checks these repo-root files stay in sync with the actual deploy/nginx/CI
+      # config; they aren't part of the backend build context, so they're mounted at the container
+      # root paths that Path(__file__).resolve().parents[2] (from /app/tests) resolves to.
+      - ./frontend/nginx.conf:/frontend/nginx.conf:ro
+      - ./deploy/ingress.yaml:/deploy/ingress.yaml:ro
+      - ./deploy/app.yaml:/deploy/app.yaml:ro
+      - ./compose.yaml:/compose.yaml:ro
+      - ./.github/workflows/ci.yaml:/.github/workflows/ci.yaml:ro
     command: ["sh", "-c", "python -m app.init_db && python -m pytest -q tests"]
     depends_on:
       test-database:
