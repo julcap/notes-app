@@ -17,6 +17,11 @@
             <button (click)="load()" *ngIf="!editing">Retry</button>
             <button (click)="error=''" aria-label="Dismiss error">×</button>
         </div>
+        <div *ngIf="undoNote" class="undo-toast" role="status">
+            <span>Meeting deleted</span>
+            <button class="text-btn" (click)="undoDelete()" [disabled]="busy">Undo</button>
+            <button class="text-btn" (click)="dismissUndo()" [disabled]="busy" aria-label="Dismiss undo">×</button>
+        </div>
         <div class="verification-banner" *ngIf="!auth.user?.email_verified">Check your inbox to verify your email before
             creating notes.
             <button class="text-btn" (click)="resend()">Resend email</button>
@@ -79,19 +84,12 @@
                     <ng-container *ngIf="selected as n; else welcome">
                         <div class="editor-toolbar"><span class="pill">MEETING NOTE</span>
                             <div>
-                                <button class="text-btn danger" (click)="confirmDelete=true" [disabled]="busy">Delete
+                                <button class="text-btn danger" (click)="remove()" [disabled]="busy">Delete
                                 </button>
                                 <button class="secondary" (click)="edit()" [disabled]="busy">✎ &nbsp; Edit note</button>
                             </div>
                         </div>
-                        <div *ngIf="confirmDelete" class="delete-confirm" role="alert">Delete this note and its
-                            attachments? This cannot be undone.
-                            <div>
-                                <button class="text-btn" (click)="confirmDelete=false">Cancel</button>
-                                <button class="primary danger-fill" (click)="remove()" [disabled]="busy">Delete note
-                                </button>
-                            </div>
-                        </div>
+
                         <h2>{{ n.title }}</h2>
                         <div class="detail-meta">
                             <span>▦ &nbsp; {{ n.meeting_date | date:'EEEE, MMMM d, yyyy' }}</span><span>♧ &nbsp; {{ n.attendees || 'Just you' }}</span>

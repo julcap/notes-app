@@ -6,8 +6,9 @@ from sqlalchemy import delete, select, text, update
 from sqlalchemy.orm import Session
 
 from ..database import db, now
+from ..jobs import try_reconcile_quarantine
 from ..notes.models import Note
-from ..storage import STORAGE
+from ..storage import FILE_CLEANUP_LOCK_ID, discard_quarantined, quarantine_files
 from . import totp
 from .config import APP_URL, SECURE
 from .email import deliver_email, email_link
@@ -193,18 +194,27 @@ def delete_account(data: DeleteAccount, request: Request, response: Response, us
             raise HTTPException(401, 'Incorrect password.')
     elif data.confirmation.strip().lower() != 'delete account':
         raise HTTPException(400, 'Type "delete account" to confirm.')
+    session.execute(
+        text('SELECT pg_advisory_xact_lock(:lock_id)'),
+        {'lock_id': FILE_CLEANUP_LOCK_ID},
+    )
     notes = session.scalars(select(Note).where(Note.owner_id == user.id)).all()
     attachment_ids = [a.id for n in notes for a in n.attachments]
-    for note in notes:
-        session.delete(note)
-    session.execute(delete(RefreshToken).where(RefreshToken.user_id == user.id))
-    session.execute(delete(EmailToken).where(EmailToken.user_id == user.id))
-    session.execute(delete(Identity).where(Identity.user_id == user.id))
-    session.execute(delete(BackupCode).where(BackupCode.user_id == user.id))
-    session.delete(user)
-    session.commit()
-    for item in attachment_ids:
-        (STORAGE / item).unlink(missing_ok=True)
+    quarantined = quarantine_files(attachment_ids)
+    try:
+        for note in notes:
+            session.delete(note)
+        session.execute(delete(RefreshToken).where(RefreshToken.user_id == user.id))
+        session.execute(delete(EmailToken).where(EmailToken.user_id == user.id))
+        session.execute(delete(Identity).where(Identity.user_id == user.id))
+        session.execute(delete(BackupCode).where(BackupCode.user_id == user.id))
+        session.delete(user)
+        session.commit()
+    except Exception:
+        session.rollback()
+        try_reconcile_quarantine()
+        raise
+    discard_quarantined(quarantined)
     response.delete_cookie('minutes_refresh', path='/api/auth', secure=SECURE, httponly=True, samesite='lax')
     response.delete_cookie('minutes_csrf', path='/', secure=SECURE, samesite='lax')
     return {'message': 'Your account and everything it owns have been deleted.'}

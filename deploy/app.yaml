@@ -99,6 +99,53 @@ spec:
   selector: {app: backend}
   ports: [{port: 8000, targetPort: 8000}]
 ---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: purge-deleted-notes
+  namespace: minutes
+spec:
+  schedule: '0 3 * * *'
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels: {app: purge-deleted-notes}
+        spec:
+          restartPolicy: Never
+          affinity:
+            podAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                - labelSelector:
+                    matchLabels: {app: backend}
+                  topologyKey: kubernetes.io/hostname
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            fsGroup: 10001
+          containers:
+            - name: purge-deleted-notes
+              image: ${BACKEND_IMAGE}
+              command: ["python", "-m", "app.jobs", "purge-deleted"]
+              env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef: {name: minutes-secrets, key: database-url}
+                - name: UPLOAD_DIR
+                  value: /data/uploads
+              volumeMounts: [{name: uploads, mountPath: /data/uploads}]
+              resources:
+                requests: {cpu: 50m, memory: 96Mi}
+                limits: {cpu: 500m, memory: 256Mi}
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities: {drop: [ALL]}
+          volumes:
+            - name: uploads
+              persistentVolumeClaim: {claimName: uploads}
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata: {name: frontend, namespace: minutes}

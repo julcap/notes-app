@@ -316,6 +316,86 @@ describe('NotesWorkspace', () => {
         expect(component.error).toContain('Your draft is still here');
     });
 
+    it('shows a 15-second undo toast after deleting a note', fakeAsync(() => {
+        fixture.detectChanges();
+        http.expectOne(request => request.url === '/api/notes').flush({items: [], total: 0});
+        flushMicrotasks();
+        component.notes = [note, secondNote];
+        component.total = 2;
+        component.selected = note;
+
+        void component.remove();
+        http.expectOne('/api/notes/note-1').flush(null);
+        flushMicrotasks();
+        http.expectOne(request => request.url === '/api/notes').flush({items: [secondNote], total: 1});
+        flushMicrotasks();
+        fixture.detectChanges();
+
+        const toast = fixture.nativeElement.querySelector('.undo-toast') as HTMLElement;
+        expect(toast.textContent).toContain('Meeting deleted');
+        expect(toast.textContent).toContain('Undo');
+        expect(component.total).toBe(1);
+        expect(component.notes).toEqual([secondNote]);
+
+        tick(14_999);
+        fixture.detectChanges();
+        expect(fixture.nativeElement.querySelector('.undo-toast')).not.toBeNull();
+        tick(1);
+        fixture.detectChanges();
+        expect(fixture.nativeElement.querySelector('.undo-toast')).toBeNull();
+    }));
+
+    it('does not offer undo after a delayed delete response consumes the server window', fakeAsync(() => {
+        fixture.detectChanges();
+        http.expectOne(request => request.url === '/api/notes').flush({items: [], total: 0});
+        flushMicrotasks();
+        component.notes = [note];
+        component.total = 1;
+        component.selected = note;
+
+        void component.remove();
+        const deletion = http.expectOne('/api/notes/note-1');
+        tick(15_000);
+        deletion.flush(null);
+        flushMicrotasks();
+        http.expectOne(request => request.url === '/api/notes').flush({items: [], total: 0});
+        flushMicrotasks();
+        fixture.detectChanges();
+
+        expect(component.undoNote).toBeNull();
+        expect(fixture.nativeElement.querySelector('.undo-toast')).toBeNull();
+    }));
+
+    it('restores a deleted note and authoritative paginated total when undo is pressed', fakeAsync(() => {
+        fixture.detectChanges();
+        http.expectOne(request => request.url === '/api/notes').flush({items: [], total: 0});
+        flushMicrotasks();
+        component.notes = [note];
+        component.total = 1;
+        component.selected = note;
+
+        void component.remove();
+        http.expectOne('/api/notes/note-1').flush(null);
+        flushMicrotasks();
+        http.expectOne(request => request.url === '/api/notes').flush({items: [], total: 0});
+        flushMicrotasks();
+
+        void component.undoDelete();
+        const undo = http.expectOne('/api/notes/note-1/undelete');
+        expect(undo.request.method).toBe('POST');
+        undo.flush(note);
+        flushMicrotasks();
+        http.expectOne(request => request.url === '/api/notes' && request.params.get('skip') === '0')
+            .flush({items: [note], total: 1});
+        flushMicrotasks();
+
+        expect(component.selected).toBe(note);
+        expect(component.notes).toEqual([note]);
+        expect(component.total).toBe(1);
+        fixture.detectChanges();
+        expect(fixture.nativeElement.querySelector('.undo-toast')).toBeNull();
+    }));
+
     it('preserves a failed delete error while reconciling pending list work', async () => {
         component.notes = [note];
         component.total = 1;

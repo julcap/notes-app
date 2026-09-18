@@ -1,10 +1,16 @@
 from datetime import timedelta
+from pathlib import Path
+
+import pytest
 import pyotp
 from fastapi import BackgroundTasks
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 from app import auth
 from app.database import SessionLocal, now
+from app.jobs import purge_deleted
 from app.notes.models import Note
+from app.storage import STORAGE
 from conftest import register, signed_in, token
 
 NOTE={'title':'Private','content':'Secret roadmap','meeting_date':'2026-09-17'}
@@ -203,7 +209,9 @@ def test_change_password(client):
 
 def test_delete_account_cascades_notes_and_attachments(client):
     n=client.post('/api/notes',json=NOTE).json()
-    client.post('/api/notes/'+n['id']+'/attachments',files={'file':('x.txt',b'bye')})
+    attachment=client.post('/api/notes/'+n['id']+'/attachments',files={'file':('x.txt',b'bye')}).json()
+    assert client.delete('/api/notes/'+n['id']).status_code==204
+    assert (STORAGE / attachment['id']).exists()
     assert client.request('DELETE','/api/auth/me',json={'password':'wrong'},headers=csrf(client)).status_code==401
     r=client.request('DELETE','/api/auth/me',json={'password':'SafePassword123'},headers=csrf(client))
     assert r.status_code==200,r.text
@@ -212,3 +220,53 @@ def test_delete_account_cascades_notes_and_attachments(client):
     with SessionLocal() as db:
         assert db.scalar(select(auth.User))is None
         assert db.scalar(select(Note))is None
+    assert not (STORAGE / attachment['id']).exists()
+
+
+def test_delete_account_restores_files_when_database_commit_fails(client, monkeypatch):
+    n=client.post('/api/notes',json=NOTE).json()
+    attachment=client.post('/api/notes/'+n['id']+'/attachments',files={'file':('x.txt',b'bye')}).json()
+    attachment_path=STORAGE / attachment['id']
+    trash_path=STORAGE / '.trash' / attachment['id']
+    original_commit=Session.commit
+
+    def fail_commit(session):
+        raise RuntimeError('temporary database failure')
+
+    monkeypatch.setattr(Session,'commit',fail_commit)
+    with pytest.raises(RuntimeError,match='temporary database failure'):
+        client.request('DELETE','/api/auth/me',json={'password':'SafePassword123'},headers=csrf(client))
+    with SessionLocal() as db:
+        assert db.scalar(select(auth.User))is not None
+        assert db.scalar(select(Note))is not None
+    assert attachment_path.read_bytes()==b'bye'
+    assert not trash_path.exists()
+
+    monkeypatch.setattr(Session,'commit',original_commit)
+    assert client.request('DELETE','/api/auth/me',json={'password':'SafePassword123'},headers=csrf(client)).status_code==200
+    assert not attachment_path.exists()
+
+
+def test_delete_account_queues_failed_final_file_removal(client, monkeypatch):
+    n=client.post('/api/notes',json=NOTE).json()
+    attachment=client.post('/api/notes/'+n['id']+'/attachments',files={'file':('x.txt',b'bye')}).json()
+    attachment_path=STORAGE / attachment['id']
+    trash_path=STORAGE / '.trash' / attachment['id']
+    original_unlink=Path.unlink
+
+    def fail_trash_cleanup(path, *, missing_ok=False):
+        if path == trash_path:
+            raise PermissionError('temporary cleanup failure')
+        return original_unlink(path, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path,'unlink',fail_trash_cleanup)
+    assert client.request('DELETE','/api/auth/me',json={'password':'SafePassword123'},headers=csrf(client)).status_code==200
+    with SessionLocal() as db:
+        assert db.scalar(select(auth.User))is None
+        assert db.scalar(select(Note))is None
+    assert not attachment_path.exists()
+    assert trash_path.read_bytes()==b'bye'
+
+    monkeypatch.setattr(Path,'unlink',original_unlink)
+    assert purge_deleted()==0
+    assert not trash_path.exists()

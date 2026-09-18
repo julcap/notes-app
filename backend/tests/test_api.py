@@ -1,9 +1,12 @@
 import os
 import tempfile
+from datetime import datetime, timezone
 os.environ['UPLOAD_DIR'] = tempfile.mkdtemp()
 from fastapi.testclient import TestClient
 from app.main import app, Base, engine, STORAGE
+from app.notes import routes as note_routes
 from sqlalchemy import text
+from sqlalchemy.orm import Session
 import pytest
 
 from conftest import signed_in
@@ -25,6 +28,70 @@ def test_crud_search_and_validation(client):
     assert client.get('/api/notes/'+n['id']).json()['title'] == 'Updated'
     assert client.delete('/api/notes/'+n['id']).status_code == 204
     assert client.get('/api/notes/'+n['id']).status_code == 404
+
+
+def test_soft_delete_hides_note_children_and_preserves_attachment(client, monkeypatch):
+    deleted_at = datetime(2026, 9, 17, 12, tzinfo=timezone.utc)
+    monkeypatch.setattr(note_routes, 'now', lambda: deleted_at)
+    n = note(client)
+    attachment = client.post(
+        f"/api/notes/{n['id']}/attachments",
+        files={'file': ('evidence.txt', b'keep me', 'text/plain')},
+    ).json()
+    action_item = client.post(
+        f"/api/notes/{n['id']}/action-items",
+        json={'text': 'Follow up'},
+    ).json()
+    attachment_path = STORAGE / attachment['id']
+
+    assert client.delete(f"/api/notes/{n['id']}").status_code == 204
+    assert attachment_path.read_bytes() == b'keep me'
+    assert client.get('/api/notes').json() == {'items': [], 'total': 0}
+    assert client.get(f"/api/notes/{n['id']}").status_code == 404
+    assert client.put(f"/api/notes/{n['id']}", json=n).status_code == 404
+    assert client.post(
+        f"/api/notes/{n['id']}/attachments",
+        files={'file': ('hidden.txt', b'hidden', 'text/plain')},
+    ).status_code == 404
+    assert client.get(f"/api/notes/{n['id']}/attachments/{attachment['id']}").status_code == 404
+    assert client.delete(f"/api/notes/{n['id']}/attachments/{attachment['id']}").status_code == 404
+    assert client.post(
+        f"/api/notes/{n['id']}/action-items",
+        json={'text': 'Hidden task'},
+    ).status_code == 404
+    assert client.patch(f"/api/action-items/{action_item['id']}", json={'done': True}).status_code == 404
+    assert client.delete(f"/api/action-items/{action_item['id']}").status_code == 404
+    assert client.delete(f"/api/notes/{n['id']}").status_code == 404
+
+    monkeypatch.setattr(note_routes, 'now', lambda: deleted_at.replace(second=15))
+    restored = client.post(f"/api/notes/{n['id']}/undelete")
+
+    assert restored.status_code == 200
+    assert restored.json()['id'] == n['id']
+    assert client.get('/api/notes').json()['total'] == 1
+    assert client.get(f"/api/notes/{n['id']}/attachments/{attachment['id']}").content == b'keep me'
+
+
+def test_undelete_rejects_other_users_and_expired_windows(raw, monkeypatch):
+    deleted_at = datetime(2026, 9, 17, 12, tzinfo=timezone.utc)
+    monkeypatch.setattr(note_routes, 'now', lambda: deleted_at)
+    owner = signed_in(raw)
+    n = note(raw)
+    assert raw.delete(f"/api/notes/{n['id']}").status_code == 204
+
+    signed_in(raw, 'other@example.com')
+    assert raw.post(f"/api/notes/{n['id']}/undelete").status_code == 404
+
+    raw.headers['Authorization'] = 'Bearer ' + owner['access_token']
+    monkeypatch.setattr(
+        note_routes,
+        'now',
+        lambda: datetime(2026, 9, 17, 12, 0, 15, 1, tzinfo=timezone.utc),
+    )
+    response = raw.post(f"/api/notes/{n['id']}/undelete")
+    assert response.status_code == 409
+    assert response.json()['detail'] == 'Undo window has expired'
+    assert raw.get(f"/api/notes/{n['id']}").status_code == 404
 
 
 def test_postgresql_full_text_search_ranking_updates_safety_and_ownership(raw):
@@ -120,6 +187,9 @@ def test_attachment_roundtrip_and_cascade(client):
     assert client.delete('/api/notes/'+other['id']+'/attachments/'+a['id']).status_code == 404
     assert len(client.get(base).json()['attachments']) == 1
     assert client.delete(base).status_code == 204
+    assert (STORAGE / a['id']).read_bytes() == b'Hello meeting'
+    assert client.post(base + '/undelete').status_code == 200
+    assert client.delete(base + '/attachments/' + a['id']).status_code == 204
     assert not (STORAGE / a['id']).exists()
 
 def test_size_limit_and_removal(client):
@@ -130,6 +200,71 @@ def test_size_limit_and_removal(client):
     a=client.post(base,files={'file':('small.txt',b'yes')}).json()
     assert client.delete(base+'/'+a['id']).status_code == 204
     assert client.get(base+'/'+a['id']).status_code == 404
+
+
+def test_attachment_delete_reconciles_files_after_database_commit_errors(client, monkeypatch):
+    n = note(client)
+    base = '/api/notes/' + n['id'] + '/attachments'
+    first = client.post(base, files={'file': ('first.txt', b'first')}).json()
+    first_path = STORAGE / first['id']
+    first_trash = STORAGE / '.trash' / first['id']
+    original_commit = Session.commit
+
+    def fail_before_commit(session):
+        raise RuntimeError('temporary database failure')
+
+    monkeypatch.setattr(Session, 'commit', fail_before_commit)
+    with pytest.raises(RuntimeError, match='temporary database failure'):
+        client.delete(base + '/' + first['id'])
+    assert client.get(base + '/' + first['id']).content == b'first'
+    assert first_path.read_bytes() == b'first'
+    assert not first_trash.exists()
+
+    monkeypatch.setattr(Session, 'commit', original_commit)
+    second = client.post(base, files={'file': ('second.txt', b'second')}).json()
+    second_path = STORAGE / second['id']
+    second_trash = STORAGE / '.trash' / second['id']
+
+    def commit_then_fail(session):
+        original_commit(session)
+        raise RuntimeError('commit result was lost')
+
+    monkeypatch.setattr(Session, 'commit', commit_then_fail)
+    with pytest.raises(RuntimeError, match='commit result was lost'):
+        client.delete(base + '/' + second['id'])
+    assert client.get(base + '/' + second['id']).status_code == 404
+    assert not second_path.exists()
+    assert not second_trash.exists()
+
+    with pytest.raises(RuntimeError, match='commit result was lost'):
+        client.post(base, files={'file': ('committed.txt', b'committed')})
+    committed = next(
+        item for item in client.get('/api/notes/' + n['id']).json()['attachments']
+        if item['filename'] == 'committed.txt'
+    )
+    committed_path = STORAGE / committed['id']
+    assert client.get(base + '/' + committed['id']).content == b'committed'
+    assert committed_path.read_bytes() == b'committed'
+    assert not (STORAGE / '.trash' / committed['id']).exists()
+
+    monkeypatch.setattr(Session, 'commit', original_commit)
+    original_refresh = Session.refresh
+
+    def fail_refresh(session, instance, *args, **kwargs):
+        raise RuntimeError('refresh failed after commit')
+
+    monkeypatch.setattr(Session, 'refresh', fail_refresh)
+    with pytest.raises(RuntimeError, match='refresh failed after commit'):
+        client.post(base, files={'file': ('refresh.txt', b'refresh')})
+    refreshed = next(
+        item for item in client.get('/api/notes/' + n['id']).json()['attachments']
+        if item['filename'] == 'refresh.txt'
+    )
+    refreshed_path = STORAGE / refreshed['id']
+    assert client.get(base + '/' + refreshed['id']).content == b'refresh'
+    assert refreshed_path.read_bytes() == b'refresh'
+    assert not (STORAGE / '.trash' / refreshed['id']).exists()
+    monkeypatch.setattr(Session, 'refresh', original_refresh)
 
 def test_action_items_crud_and_ownership(client):
     n = note(client)

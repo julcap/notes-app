@@ -21,6 +21,7 @@ export class NotesWorkspace implements OnInit, OnDestroy {
     private http = inject(HttpClient);
     private requestVersion = 0;
     private searchTimer?: ReturnType<typeof setTimeout>;
+    private undoTimer?: ReturnType<typeof setTimeout>;
     auth = inject(AuthService);
 
     notes: Note[] = [];
@@ -34,7 +35,7 @@ export class NotesWorkspace implements OnInit, OnDestroy {
     editing = false;
     error = '';
     message = '';
-    confirmDelete = false;
+    undoNote: Note | null = null;
     newActionItem = this.blankActionItem();
 
     async logout() {
@@ -106,6 +107,7 @@ export class NotesWorkspace implements OnInit, OnDestroy {
 
     ngOnDestroy() {
         if (this.searchTimer) clearTimeout(this.searchTimer);
+        if (this.undoTimer) clearTimeout(this.undoTimer);
     }
 
     private invalidateListResponse() {
@@ -179,7 +181,6 @@ export class NotesWorkspace implements OnInit, OnDestroy {
     private applySelection(note: Note) {
         this.selected = note;
         this.editing = false;
-        this.confirmDelete = false;
         this.message = '';
         this.newActionItem = this.blankActionItem();
     }
@@ -200,7 +201,6 @@ export class NotesWorkspace implements OnInit, OnDestroy {
         this.selected = null;
         this.draft = this.blank();
         this.editing = true;
-        this.confirmDelete = false;
         this.error = '';
     }
 
@@ -239,7 +239,9 @@ export class NotesWorkspace implements OnInit, OnDestroy {
 
     async remove() {
         if (!this.selected || this.busy) return;
+        const deletedNote = this.selected;
         const noteId = this.selected.id;
+        const undoDeadline = Date.now() + 15_000;
         this.cancelListWork();
         let operationError = '';
         this.busy = true;
@@ -255,8 +257,48 @@ export class NotesWorkspace implements OnInit, OnDestroy {
             this.notes = this.notes.filter(note => note.id !== noteId);
             if (wasVisible) this.total = Math.max(0, this.total - 1);
             this.selected = this.notes[0] || null;
-            this.confirmDelete = false;
             this.message = 'Note deleted';
+            this.showUndo(deletedNote, undoDeadline);
+        }
+        await this.load();
+        if (operationError) this.error = operationError;
+    }
+
+    private showUndo(note: Note, deadline: number) {
+        this.dismissUndo();
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) return;
+        this.undoNote = note;
+        this.undoTimer = setTimeout(() => {
+            this.undoNote = null;
+            this.undoTimer = undefined;
+        }, remaining);
+    }
+
+    dismissUndo() {
+        if (this.undoTimer) clearTimeout(this.undoTimer);
+        this.undoTimer = undefined;
+        this.undoNote = null;
+    }
+
+    async undoDelete() {
+        if (!this.undoNote || this.busy) return;
+        const deletedNote = this.undoNote;
+        this.cancelListWork();
+        let operationError = '';
+        this.busy = true;
+        this.error = '';
+        try {
+            const restored = await firstValueFrom(
+                this.http.post<Note>(`/api/notes/${deletedNote.id}/undelete`, {})
+            );
+            this.selected = restored;
+            this.message = 'Meeting restored';
+        } catch {
+            operationError = 'The note could not be restored. The undo window may have expired.';
+        } finally {
+            this.busy = false;
+            this.dismissUndo();
         }
         await this.load();
         if (operationError) this.error = operationError;

@@ -1,6 +1,6 @@
 # Minutes — Meeting Notes
 
-A standalone meeting notes workspace built from `Meeting Notes App.md`: Angular frontend, Python/FastAPI backend, and PostgreSQL. Create, edit, delete, and search notes; record meeting dates and attendees; upload, download, and remove attachments.
+A standalone meeting notes workspace built from `Meeting Notes App.md`: Angular frontend, Python/FastAPI backend, and PostgreSQL. Create, edit, search, and safely undo deleted notes; record meeting dates and attendees; upload, download, and remove attachments.
 
 ## Run locally
 
@@ -15,7 +15,7 @@ docker compose up --build -d
 
 Open http://localhost:8080 and create an account. Open the local development inbox at http://localhost:8025 to find the verification email, follow its link, and click **Verify email**. You can then create a note. Production mail uses AWS SES. See [AUTH.md](AUTH.md) for configuration and security details. Notes and uploads survive container restarts in named Docker volumes. `docker compose down` stops the app without deleting data; adding `-v` permanently removes local data.
 
-The app starts empty intentionally. Search filters title, body, and attendees. The API also supports `GET /api/notes?q=keyword`. Attachments have a 20 MB limit and are served as downloads rather than inline executable content. Filenames are metadata; server-generated UUIDs determine disk paths.
+The app starts empty intentionally. Search filters title, body, and attendees. The API also supports `GET /api/notes?q=keyword`. Deleting a note starts a 15-second undo window; hidden notes and attachment bytes are retained for 30 days before the scheduled purge. Attachments have a 20 MB limit and are served as downloads rather than inline executable content. Filenames are metadata; server-generated UUIDs determine disk paths.
 
 ## Development
 
@@ -58,7 +58,7 @@ npm ci
 npm run build
 ```
 
-Tests use a separate disposable PostgreSQL database. The test container upgrades it through Alembic before pytest; fixtures clear rows between tests without recreating schema. Migration coverage includes empty installs, validated adoption of populated current installs, ownerless pre-auth data preservation, drift rejection, repeated upgrades, and concurrent startup. Never point either the migration tests or the full Python suite at production.
+Tests use a separate disposable PostgreSQL database. The test container upgrades it through Alembic before pytest; fixtures clear rows between tests without recreating schema. Migration coverage includes empty installs, validated adoption of populated current installs, ownerless pre-auth data preservation, drift rejection, repeated upgrades, and concurrent startup. Purge tests require actual PostgreSQL for advisory-lock coverage and temporary file storage. Never point migration, purge, or full Python tests at production.
 
 ## Architecture
 
@@ -72,15 +72,16 @@ Browser → Angular served by Nginx → `/api` reverse proxy → FastAPI → Pos
 - `frontend/src/styles.css`: shared responsive styling.
 - `backend/app/main.py`: FastAPI app wiring (middleware, routers, health check).
 - `backend/app/database.py`: SQLAlchemy engine, session factory, declarative base.
-- `backend/app/storage.py`: shared attachment-storage path/size-limit constants used by both `notes/routes.py` and account deletion.
+- `backend/app/storage.py`: shared attachment-storage constants plus same-filesystem quarantine/restore helpers used by purge and account deletion.
 - `backend/app/auth/`: accounts, sessions and email — `models.py`/`schemas.py` (data), `security.py` (hashing, rate limiting, origin checks), `tokens.py` (JWTs, cookies, dependencies, MFA challenges), `email.py` (SES/SMTP delivery), `totp.py` (TOTP secrets, QR codes, backup codes), `routes.py` (register/login/reset/verify/account management/2FA), `oauth.py` (Google/Facebook/Amazon).
-- `backend/app/notes/`: meeting notes and attachments — `models.py`/`schemas.py` (data), `routes.py` (CRUD + file upload/download).
+- `backend/app/notes/`: meeting notes and attachments — `models.py`/`schemas.py` (data), `routes.py` (CRUD, 15-second undo, and file upload/download).
+- `backend/app/jobs.py`: internal scheduled-job CLI; `python -m app.jobs purge-deleted` performs PostgreSQL-locked, retry-safe permanent cleanup after 30 days.
 - `backend/app/migrations.py` and `backend/migrations/`: the Alembic upgrade entrypoint and immutable schema revisions. Every schema change must add a revision; `app.init_db` only runs `upgrade head`.
 - `compose.yaml`: local application stack; only the frontend is published, on localhost.
 - `deploy/`: EKS manifests.
 - `.github/workflows/ci.yaml`: PR checks and main-branch deployment.
 
-Notes are Markdown-formatted text rendered through an allowlisted sanitizer. File metadata is in PostgreSQL; file bytes are on a persistent volume. Each account has private notes and attachments. Email verification is required before creating notes. Access JWTs live in browser memory; refresh sessions use HttpOnly cookies. List/search is server-backed with PostgreSQL full-text indexing, stable paginated results, totals, and a 50-note default page size. Concurrent edits currently use last-save-wins. Back up the database and file volume together. A crash between database commit and file deletion can leave unreferenced files; it cannot expose them through the API.
+Notes are Markdown-formatted text rendered through an allowlisted sanitizer. File metadata is in PostgreSQL; file bytes are on a persistent volume. Each account has private notes and attachments. Email verification is required before creating notes. Access JWTs live in browser memory; refresh sessions use HttpOnly cookies. List/search is server-backed with PostgreSQL full-text indexing, stable paginated results, totals, and a 50-note default page size. Soft-deleted notes are hidden immediately. Permanent deletion atomically moves bytes into a same-filesystem `.trash` quarantine before the database commit, restores them on rollback, and lets the scheduled job retry any final unlink that failed. Concurrent edits currently use last-save-wins. Back up the database and file volume together.
 
 ## EKS deployment
 
@@ -109,7 +110,7 @@ kubectl -n minutes rollout status deployment/backend
 kubectl -n minutes rollout status deployment/frontend
 ```
 
-The backend uses a single replica with `Recreate` updates for its EBS volume; updates briefly interrupt API availability. Move files to S3 before scaling backend replicas. The frontend has two replicas. The manifests assume x86-64 EKS nodes, matching the GitHub Actions image build.
+The backend uses a single replica with `Recreate` updates for its EBS volume; updates briefly interrupt API availability. The `purge-deleted-notes` CronJob runs daily at 03:00 UTC, mounts that same upload volume, forbids overlapping Kubernetes Jobs, takes a PostgreSQL advisory lock, and uses required pod affinity so the ReadWriteOnce EBS volume is mounted from the backend node. Move files to S3 before scaling backend replicas. The frontend has two replicas. The manifests assume x86-64 EKS nodes, matching the GitHub Actions image build.
 
 Authentication and owner checks protect all notes and attachments. The ALB remains internal by default. Configure the production origin, secure cookies, SES, and OAuth secrets as described in AUTH.md before making the service public.
 

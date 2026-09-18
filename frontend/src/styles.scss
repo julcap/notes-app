@@ -835,8 +835,25 @@ textarea {
     float: right
 }
 
-.delete-confirm div {
-    margin-top: 10px
+.undo-toast {
+    position: fixed;
+    right: 24px;
+    bottom: 24px;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 18px;
+    border-radius: 8px;
+    background: #26382a;
+    color: #fff;
+    box-shadow: 0 8px 28px rgba(21, 37, 24, .24);
+    font-size: 13px
+}
+
+.undo-toast .text-btn {
+    color: #d8eed4;
+    font-weight: 700
 }
 
 .danger {
