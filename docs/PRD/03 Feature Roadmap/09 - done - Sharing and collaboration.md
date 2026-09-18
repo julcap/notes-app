@@ -2,7 +2,7 @@
 
 2026-09-17 · split from `03 Feature Roadmap (Post-MVP).md`
 
-**Status:** Not started. Largest change in the original roadmap doc — touches the data model, every meeting endpoint's authorization check, and several UI surfaces. Reasonable to defer until the smaller items in this folder are done.
+**Status:** Code-complete 2026-09-18. Owners can share with one verified, unambiguous account or explicitly confirmed previous recipients; `view` and `edit` are enforced centrally across notes, search, exports, action items, and attachments. The UI shows effective permission and removes unavailable controls. Production deployment still requires the normal Alembic migration and release process.
 
 ## Problem
 
@@ -43,3 +43,14 @@ Today a meeting belongs to exactly one user and nobody else can see it (`Note.ow
 ## Sequencing note
 
 Land this after [02](./02%20-%20done%20-%20Rich%20text%20notes%20formatting.md)–[08](./08%20-%20done%20-%20Notifications%20and%20reminders.md): every other spec in this folder assumes single-owner semantics, and retrofitting shared-access checks into a handful of already-shipped features is more work than building them against single ownership first and adding the permission check as one focused pass at the end.
+
+## Shipped implementation
+
+- Alembic owns `meeting_shares` and owner-specific `sharing_contacts`, with unique pairs, constrained permissions, and cascading note/account foreign keys.
+- `backend/app/notes/permissions.py` is the authorization choke point. Editors cannot delete, undelete, reschedule, or manage sharing; viewers cannot mutate; strangers receive no note disclosure.
+- Share-by-email rejects missing, unverified, self, and ambiguous matches with the same generic response. Revocation is immediate; it does not remove the historical contact, and bulk re-sharing requires the explicit previous-recipient endpoint.
+- List totals, pagination, and full-text search include live shared notes once, while deleted or unshared notes do not leak.
+- Angular badges, editor/attachment/action-item controls, sharing management, and the same-origin auth interceptor reflect the effective permission.
+- PostgreSQL integration coverage exercises owner/view/edit/stranger access, every route family, revocation, recipient/owner account deletion, target privacy, historical contacts, pagination/search, and schema constraints. Real-Chromium tests cover permission-aware controls and `/api/action-items`/`/api/sharing` token refresh behavior.
+
+Tags mentioned in the original wording remain out of scope because this application has no tags feature.

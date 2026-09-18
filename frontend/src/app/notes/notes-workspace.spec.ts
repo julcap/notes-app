@@ -29,7 +29,9 @@ const note: Note = {
     scheduled_at: null,
     updated_at: '2026-09-17T00:00:00Z',
     attachments: [],
-    action_items: []
+    action_items: [],
+    effective_permission: 'owner',
+    is_owner: true
 };
 
 const secondNote: Note = {
@@ -671,5 +673,99 @@ describe('NotesWorkspace', () => {
         expect(item.done).toBeTrue();
         expect(component.selected?.action_items[0].done).toBeTrue();
         expect(component.notes[0].action_items[0].done).toBeTrue();
+    });
+
+    it('shows shared badges and hides every write affordance from view-only collaborators', () => {
+        const shared = {...note, effective_permission: 'view', is_owner: false} as Note;
+        component.notes = [shared];
+        component.selected = shared;
+        fixture.detectChanges();
+        http.expectOne(request => request.url === '/api/notes').flush({items: [shared], total: 1});
+
+        expect(fixture.nativeElement.textContent).toContain('Shared · view');
+        expect(fixture.nativeElement.querySelector('[data-action="edit-note"]')).toBeNull();
+        expect(fixture.nativeElement.querySelector('[data-action="delete-note"]')).toBeNull();
+        expect(fixture.nativeElement.querySelector('[data-action="share-note"]')).toBeNull();
+        expect(fixture.nativeElement.querySelector('input[aria-label="Upload attachment"]')).toBeNull();
+        expect(fixture.nativeElement.querySelector('.action-item-form')).toBeNull();
+    });
+
+    it('allows edit collaborators to edit content and children without owner-only controls', () => {
+        const shared = {...note, effective_permission: 'edit', is_owner: false} as Note;
+        component.notes = [shared];
+        component.selected = shared;
+        fixture.detectChanges();
+        http.expectOne(request => request.url === '/api/notes').flush({items: [shared], total: 1});
+
+        expect(fixture.nativeElement.querySelector('[data-action="edit-note"]')).not.toBeNull();
+        expect(fixture.nativeElement.querySelector('[data-action="delete-note"]')).toBeNull();
+        expect(fixture.nativeElement.querySelector('[data-action="share-note"]')).toBeNull();
+        expect(fixture.nativeElement.querySelector('input[aria-label="Upload attachment"]')).not.toBeNull();
+        expect(fixture.nativeElement.querySelector('.action-item-form')).not.toBeNull();
+    });
+
+    it('loads collaborators and previous contacts before explicit bulk sharing', async () => {
+        const owned = {...note, effective_permission: 'owner', is_owner: true} as Note;
+        component.notes = [owned];
+        component.selected = owned;
+
+        const opening = component.openSharing();
+        http.expectOne('/api/notes/note-1/shares').flush([
+            {user_id: 2, email: 'viewer@example.com', display_name: 'Viewer', permission: 'view', shared_at: '2026-09-18T00:00:00Z'}
+        ]);
+        http.expectOne('/api/sharing/contacts').flush([
+            {user_id: 2, email: 'viewer@example.com', display_name: 'Viewer'}
+        ]);
+        await opening;
+        expect(component.sharingOpen).toBeTrue();
+        expect(component.shares.length).toBe(1);
+        expect(component.sharingContacts.length).toBe(1);
+
+        spyOn(window, 'confirm').and.returnValue(true);
+        const bulk = component.shareWithPrevious();
+        const request = http.expectOne('/api/notes/note-1/shares/previous');
+        expect(request.request.method).toBe('POST');
+        expect(request.request.body).toEqual({permission: 'view', user_ids: [2]});
+        request.flush(component.shares);
+        await bulk;
+        expect(window.confirm).toHaveBeenCalledWith('Share with viewer@example.com?');
+    });
+
+    it('discards stale sharing responses after selecting another note', async () => {
+        const first = {...note, effective_permission: 'owner', is_owner: true} as Note;
+        const second = {...first, id: 'note-2', title: 'Second'} as Note;
+        component.notes = [first, second];
+        component.selected = first;
+
+        const opening = component.openSharing();
+        const staleShares = http.expectOne('/api/notes/note-1/shares');
+        const staleContacts = http.expectOne('/api/sharing/contacts');
+        component.select(second);
+        staleShares.flush([
+            {user_id: 2, email: 'viewer@example.com', display_name: 'Viewer', permission: 'view', shared_at: '2026-09-18T00:00:00Z'}
+        ]);
+        staleContacts.flush([{user_id: 2, email: 'viewer@example.com', display_name: 'Viewer'}]);
+        await opening;
+
+        expect(component.selected?.id).toBe('note-2');
+        expect(component.sharingOpen).toBeFalse();
+        expect(component.shares).toEqual([]);
+        expect(component.sharingContacts).toEqual([]);
+    });
+
+    it('clears sharing state when creating a new note', () => {
+        component.selected = {...note, effective_permission: 'owner', is_owner: true} as Note;
+        component.sharingOpen = true;
+        component.shares = [
+            {user_id: 2, email: 'viewer@example.com', display_name: 'Viewer', permission: 'view', shared_at: '2026-09-18T00:00:00Z'}
+        ];
+        component.sharingContacts = [{user_id: 2, email: 'viewer@example.com', display_name: 'Viewer'}];
+
+        component.create();
+
+        expect(component.selected).toBeNull();
+        expect(component.sharingOpen).toBeFalse();
+        expect(component.shares).toEqual([]);
+        expect(component.sharingContacts).toEqual([]);
     });
 });

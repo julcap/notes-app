@@ -2,12 +2,13 @@ import secrets
 
 import bcrypt
 from fastapi import BackgroundTasks, Depends, HTTPException, Request, Response
-from sqlalchemy import delete, select, text, update
+from sqlalchemy import delete, or_, select, text, update
 from sqlalchemy.orm import Session
 
 from ..database import db, now
 from ..jobs import try_reconcile_quarantine
-from ..notes.models import Note
+from ..notes.models import MeetingShare, Note
+from ..notes.permissions import lock_account
 from ..storage import FILE_CLEANUP_LOCK_ID, discard_quarantined, quarantine_files
 from . import totp
 from .config import APP_URL, SECURE
@@ -223,7 +224,17 @@ def delete_account(data: DeleteAccount, request: Request, response: Response, us
         text('SELECT pg_advisory_xact_lock(:lock_id)'),
         {'lock_id': FILE_CLEANUP_LOCK_ID},
     )
-    notes = session.scalars(select(Note).where(Note.owner_id == user.id)).all()
+    lock_account(session, user.id)
+    locked_notes = session.scalars(
+        select(Note)
+        .where(or_(
+            Note.owner_id == user.id,
+            Note.id.in_(select(MeetingShare.note_id).where(MeetingShare.user_id == user.id)),
+        ))
+        .order_by(Note.id)
+        .with_for_update()
+    ).all()
+    notes = [note for note in locked_notes if note.owner_id == user.id]
     attachment_ids = [a.id for n in notes for a in n.attachments]
     quarantined = quarantine_files(attachment_ids)
     try:

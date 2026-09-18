@@ -5,7 +5,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, Response
-from sqlalchemy import func, literal_column, select, text
+from sqlalchemy import and_, func, literal_column, or_, select, text
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Session, selectinload
 
@@ -15,34 +15,12 @@ from ..jobs import try_reconcile_quarantine
 from ..storage import FILE_CLEANUP_LOCK_ID, MAX_FILE_SIZE, STORAGE, discard_quarantined, quarantine_files
 from .attachments import BINARY_CONTENT_TYPE, stored_content_type, verified_inline_content_type
 from .export import export_filename, markdown_export, pdf_export
-from .models import ActionItem, Attachment, Note
+from .models import ActionItem, Attachment, MeetingShare, Note
+from .permissions import apply_permission, get_action_item, get_note, lock_account
 from .schemas import ActionItemInput, ActionItemOut, ActionItemPatch, AttachmentOut, NoteInput, NoteOut, NotePage
 
 router = APIRouter(prefix='/api/notes')
 action_items_router = APIRouter(prefix='/api/action-items')
-
-
-def get_note(session, note_id, user):
-    note = session.scalar(
-        select(Note).where(
-            Note.id == note_id,
-            Note.owner_id == user.id,
-            Note.deleted_at.is_(None),
-        )
-    )
-    if note is None:
-        raise HTTPException(404, 'Note not found')
-    return note
-
-
-def get_action_item(session, item_id, user):
-    item = session.get(ActionItem, item_id)
-    if item is None:
-        raise HTTPException(404, 'Action item not found')
-    note = session.get(Note, item.note_id)
-    if note is None or note.owner_id != user.id or note.deleted_at is not None:
-        raise HTTPException(404, 'Action item not found')
-    return item
 
 
 @router.get('', response_model=NotePage)
@@ -53,25 +31,38 @@ def notes(
     session: Session = Depends(db),
     user: User = Depends(current_user),
 ):
-    filters = [Note.owner_id == user.id, Note.deleted_at.is_(None)]
+    share_join = and_(MeetingShare.note_id == Note.id, MeetingShare.user_id == user.id)
+    filters = [or_(Note.owner_id == user.id, MeetingShare.user_id == user.id), Note.deleted_at.is_(None)]
     order = (Note.meeting_date.desc(), Note.updated_at.desc(), Note.id.asc())
     if q.strip():
         search_vector = literal_column('notes.search_vector', postgresql.TSVECTOR())
         search_query = func.plainto_tsquery(literal_column("'pg_catalog.simple'::regconfig"), q.strip())
         filters.append(search_vector.op('@@')(search_query))
         order = (func.ts_rank(search_vector, search_query).desc(), *order)
-    total = session.scalar(select(func.count()).select_from(Note).where(*filters)) or 0
-    query = select(Note).where(*filters).options(selectinload(Note.attachments)).order_by(*order).offset(skip).limit(limit)
-    return {'items': session.scalars(query).all(), 'total': total}
+    total = session.scalar(select(func.count()).select_from(Note).outerjoin(MeetingShare, share_join).where(*filters)) or 0
+    query = (
+        select(Note, MeetingShare.permission)
+        .outerjoin(MeetingShare, share_join)
+        .where(*filters)
+        .options(selectinload(Note.attachments))
+        .order_by(*order)
+        .offset(skip)
+        .limit(limit)
+    )
+    items = [apply_permission(note, user.id, permission) for note, permission in session.execute(query).all()]
+    return {'items': items, 'total': total}
 
 
 @router.post('', response_model=NoteOut, status_code=201)
 def create_note(payload: NoteInput, session: Session = Depends(db), user: User = Depends(verified_user)):
+    lock_account(session, user.id)
+    if session.scalar(select(User.id).where(User.id == user.id)) is None:
+        raise HTTPException(401, 'Invalid or expired token')
     note = Note(owner_id=user.id, **payload.model_dump())
     session.add(note)
     session.commit()
     session.refresh(note)
-    return note
+    return apply_permission(note, user.id)
 
 
 @router.get('/{note_id}', response_model=NoteOut)
@@ -112,8 +103,12 @@ def export_note(
 
 @router.put('/{note_id}', response_model=NoteOut)
 def update_note(note_id: str, payload: NoteInput, session: Session = Depends(db), user: User = Depends(current_user)):
-    note = get_note(session, note_id, user)
+    note = get_note(session, note_id, user, required='edit', lock=True)
+    if not note.is_owner and payload.scheduled_at != note.scheduled_at:
+        raise HTTPException(403, 'Only the owner can change scheduling')
     for key, value in payload.model_dump().items():
+        if key == 'scheduled_at' and not note.is_owner:
+            continue
         setattr(note, key, value)
     note.updated_at = now()
     session.commit()
@@ -123,21 +118,15 @@ def update_note(note_id: str, payload: NoteInput, session: Session = Depends(db)
 
 @router.delete('/{note_id}', status_code=204)
 def delete_note(note_id: str, session: Session = Depends(db), user: User = Depends(current_user)):
-    note = get_note(session, note_id, user)
+    note = get_note(session, note_id, user, required='owner', lock=True)
     note.deleted_at = now()
     session.commit()
 
 
 @router.post('/{note_id}/undelete', response_model=NoteOut)
 def undelete_note(note_id: str, session: Session = Depends(db), user: User = Depends(current_user)):
-    note = session.scalar(
-        select(Note).where(
-            Note.id == note_id,
-            Note.owner_id == user.id,
-            Note.deleted_at.is_not(None),
-        )
-    )
-    if note is None:
+    note = get_note(session, note_id, user, required='owner', include_deleted=True, lock=True)
+    if note.deleted_at is None:
         raise HTTPException(404, 'Note not found')
     if now() - note.deleted_at > timedelta(seconds=15):
         raise HTTPException(409, 'Undo window has expired')
@@ -149,7 +138,7 @@ def undelete_note(note_id: str, session: Session = Depends(db), user: User = Dep
 
 @router.post('/{note_id}/action-items', response_model=ActionItemOut, status_code=201)
 def create_action_item(note_id: str, payload: ActionItemInput, session: Session = Depends(db), user: User = Depends(current_user)):
-    note = get_note(session, note_id, user)
+    note = get_note(session, note_id, user, required='edit', lock=True)
     item = ActionItem(note_id=note.id, **payload.model_dump())
     session.add(item)
     note.updated_at = now()
@@ -161,7 +150,7 @@ def create_action_item(note_id: str, payload: ActionItemInput, session: Session 
 @router.post('/{note_id}/attachments', response_model=AttachmentOut, status_code=201)
 def upload(note_id: str, file: UploadFile, session: Session = Depends(db), user: User = Depends(current_user)):
     session.execute(text('SELECT pg_advisory_xact_lock(:lock_id)'), {'lock_id': FILE_CLEANUP_LOCK_ID})
-    note = get_note(session, note_id, user)
+    note = get_note(session, note_id, user, required='edit', lock=True)
     attachment_id = str(uuid.uuid4())
     path = STORAGE / attachment_id
     size = 0
@@ -224,7 +213,7 @@ def download(
 @router.delete('/{note_id}/attachments/{attachment_id}', status_code=204)
 def delete_attachment(note_id: str, attachment_id: str, session: Session = Depends(db), user: User = Depends(current_user)):
     session.execute(text('SELECT pg_advisory_xact_lock(:lock_id)'), {'lock_id': FILE_CLEANUP_LOCK_ID})
-    get_note(session, note_id, user)
+    get_note(session, note_id, user, required='edit', lock=True)
     item = session.get(Attachment, attachment_id)
     if item is None or item.note_id != note_id:
         raise HTTPException(404, 'Attachment not found')

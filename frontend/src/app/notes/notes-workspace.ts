@@ -8,7 +8,7 @@ import {firstValueFrom} from 'rxjs';
 
 import {AuthService} from '../auth/auth.service';
 import {NavRail} from '../shell/nav-rail';
-import {ActionItem, Attachment, Note, NotePage} from './note.model';
+import {ActionItem, Attachment, MeetingShare, Note, NotePage, SharingContact} from './note.model';
 import {MarkdownEditor} from './markdown-editor';
 import {MarkdownRenderer} from './markdown-renderer';
 import {localDateTimeToUtc, utcToLocalDateTime} from './scheduling';
@@ -30,6 +30,7 @@ export class NotesWorkspace implements OnInit, OnDestroy {
     private sanitizer = inject(DomSanitizer);
     private requestVersion = 0;
     private previewVersion = 0;
+    private sharingRequestVersion = 0;
     private searchTimer?: ReturnType<typeof setTimeout>;
     private undoTimer?: ReturnType<typeof setTimeout>;
     auth = inject(AuthService);
@@ -48,6 +49,12 @@ export class NotesWorkspace implements OnInit, OnDestroy {
     undoNote: Note | null = null;
     newActionItem = this.blankActionItem();
     attachmentPreviews: Record<string, AttachmentPreview> = {};
+    sharingOpen = false;
+    shares: MeetingShare[] = [];
+    sharingContacts: SharingContact[] = [];
+    shareEmail = '';
+    sharePermission: 'view' | 'edit' = 'view';
+    previousPermission: 'view' | 'edit' = 'view';
 
     async logout() {
         if (this.dirty && !window.confirm('Discard unsaved changes and log out?')) return;
@@ -103,6 +110,103 @@ export class NotesWorkspace implements OnInit, OnDestroy {
         }
     }
 
+    async openSharing() {
+        if (!this.selected || !this.isOwner) return;
+        const noteId = this.selected.id;
+        const version = ++this.sharingRequestVersion;
+        this.sharingOpen = true;
+        this.shares = [];
+        this.sharingContacts = [];
+        this.error = '';
+        try {
+            const [shares, contacts] = await Promise.all([
+                firstValueFrom(this.http.get<MeetingShare[]>(`/api/notes/${noteId}/shares`)),
+                firstValueFrom(this.http.get<SharingContact[]>('/api/sharing/contacts'))
+            ]);
+            if (version !== this.sharingRequestVersion || this.selected?.id !== noteId) return;
+            this.shares = shares;
+            this.sharingContacts = contacts;
+        } catch {
+            if (version !== this.sharingRequestVersion || this.selected?.id !== noteId) return;
+            this.sharingOpen = false;
+            this.error = 'Could not load sharing settings. Please try again.';
+        }
+    }
+
+    async addShare() {
+        if (!this.selected || !this.isOwner || !this.shareEmail.trim() || this.busy) return;
+        this.busy = true;
+        this.error = '';
+        try {
+            const share = await firstValueFrom(this.http.post<MeetingShare>(
+                `/api/notes/${this.selected.id}/shares`,
+                {email: this.shareEmail.trim(), permission: this.sharePermission}
+            ));
+            this.shares = [...this.shares.filter(item => item.user_id !== share.user_id), share]
+                .sort((a, b) => a.email.localeCompare(b.email));
+            this.shareEmail = '';
+            this.message = 'Sharing updated';
+        } catch {
+            this.error = 'That verified sharing recipient could not be found.';
+            this.busy = false;
+            return;
+        }
+        try {
+            this.sharingContacts = await firstValueFrom(this.http.get<SharingContact[]>('/api/sharing/contacts'));
+        } catch {
+            this.error = 'Sharing was updated, but previous recipients could not be refreshed.';
+        } finally {
+            this.busy = false;
+        }
+    }
+
+    async updateShare(share: MeetingShare, permission: 'view' | 'edit') {
+        if (!this.selected || !this.isOwner || this.busy) return;
+        this.busy = true;
+        try {
+            const updated = await firstValueFrom(this.http.patch<MeetingShare>(
+                `/api/notes/${this.selected.id}/shares/${share.user_id}`,
+                {permission}
+            ));
+            this.shares = this.shares.map(item => item.user_id === updated.user_id ? updated : item);
+        } catch {
+            this.error = 'Could not update that collaborator.';
+        } finally {
+            this.busy = false;
+        }
+    }
+
+    async removeShare(share: MeetingShare) {
+        if (!this.selected || !this.isOwner || this.busy) return;
+        this.busy = true;
+        try {
+            await firstValueFrom(this.http.delete(`/api/notes/${this.selected.id}/shares/${share.user_id}`));
+            this.shares = this.shares.filter(item => item.user_id !== share.user_id);
+        } catch {
+            this.error = 'Could not remove that collaborator.';
+        } finally {
+            this.busy = false;
+        }
+    }
+
+    async shareWithPrevious() {
+        if (!this.selected || !this.isOwner || !this.sharingContacts.length || this.busy) return;
+        const recipients = this.sharingContacts.map(contact => contact.email).join(', ');
+        if (!window.confirm(`Share with ${recipients}?`)) return;
+        this.busy = true;
+        try {
+            this.shares = await firstValueFrom(this.http.post<MeetingShare[]>(
+                `/api/notes/${this.selected.id}/shares/previous`,
+                {permission: this.previousPermission, user_ids: this.sharingContacts.map(contact => contact.user_id)}
+            ));
+            this.message = 'Shared with previous recipients';
+        } catch {
+            this.error = 'Could not share with previous recipients.';
+        } finally {
+            this.busy = false;
+        }
+    }
+
     blank() {
         const d = new Date();
         return {
@@ -120,6 +224,14 @@ export class NotesWorkspace implements OnInit, OnDestroy {
 
     get hasMore() {
         return this.notes.length < this.total;
+    }
+
+    get canEdit() {
+        return this.selected?.effective_permission === 'owner' || this.selected?.effective_permission === 'edit';
+    }
+
+    get isOwner() {
+        return this.selected?.is_owner === true;
     }
 
     get dirty() {
@@ -219,11 +331,22 @@ export class NotesWorkspace implements OnInit, OnDestroy {
     }
 
     private applySelection(note: Note) {
+        this.resetSharingState();
         this.selected = note;
         this.editing = false;
         this.message = '';
         this.newActionItem = this.blankActionItem();
         void this.loadAttachmentPreviews(note);
+    }
+
+    private resetSharingState() {
+        this.sharingRequestVersion++;
+        this.sharingOpen = false;
+        this.shares = [];
+        this.sharingContacts = [];
+        this.shareEmail = '';
+        this.sharePermission = 'view';
+        this.previousPermission = 'view';
     }
 
     select(n: Note) {
@@ -240,6 +363,7 @@ export class NotesWorkspace implements OnInit, OnDestroy {
         if (this.busy || (this.dirty && !window.confirm('Discard unsaved changes?'))) return;
         this.invalidateListResponse();
         this.clearAttachmentPreviews();
+        this.resetSharingState();
         this.selected = null;
         this.draft = this.blank();
         this.editing = true;
@@ -247,7 +371,7 @@ export class NotesWorkspace implements OnInit, OnDestroy {
     }
 
     edit() {
-        if (this.selected) {
+        if (this.selected && this.canEdit) {
             this.draft = this.fields(this.selected);
             this.editing = true;
         }
@@ -255,12 +379,16 @@ export class NotesWorkspace implements OnInit, OnDestroy {
 
     cancel() {
         if (this.dirty && !window.confirm('Discard unsaved changes?')) return;
-        this.editing = false;
-        if (!this.selected) this.selected = this.notes[0] || null;
+        if (!this.selected && this.notes[0]) {
+            this.applySelection(this.notes[0]);
+        } else {
+            this.editing = false;
+            this.resetSharingState();
+        }
     }
 
     async save() {
-        if (!this.draft.title.trim() || !this.draft.meeting_date || this.busy) return;
+        if (!this.draft.title.trim() || !this.draft.meeting_date || this.busy || (this.selected && !this.canEdit)) return;
         this.cancelListWork();
         let operationError = '';
         this.busy = true;
@@ -271,9 +399,7 @@ export class NotesWorkspace implements OnInit, OnDestroy {
                 scheduled_at: localDateTimeToUtc(this.draft.scheduled_at)
             };
             const n = await firstValueFrom(this.selected ? this.http.put<Note>('/api/notes/' + this.selected.id, payload) : this.http.post<Note>('/api/notes', payload));
-            this.selected = n;
-            void this.loadAttachmentPreviews(n);
-            this.editing = false;
+            this.applySelection(n);
             this.message = 'All changes saved';
         } catch {
             operationError = 'Your note could not be saved. Your draft is still here—please try again.';
@@ -285,7 +411,7 @@ export class NotesWorkspace implements OnInit, OnDestroy {
     }
 
     async remove() {
-        if (!this.selected || this.busy) return;
+        if (!this.selected || !this.isOwner || this.busy) return;
         const deletedNote = this.selected;
         const noteId = this.selected.id;
         const undoDeadline = Date.now() + 15_000;
@@ -307,6 +433,7 @@ export class NotesWorkspace implements OnInit, OnDestroy {
                 this.applySelection(this.notes[0]);
             } else {
                 this.clearAttachmentPreviews();
+                this.resetSharingState();
                 this.selected = null;
             }
             this.message = 'Note deleted';
@@ -344,8 +471,7 @@ export class NotesWorkspace implements OnInit, OnDestroy {
             const restored = await firstValueFrom(
                 this.http.post<Note>(`/api/notes/${deletedNote.id}/undelete`, {})
             );
-            this.selected = restored;
-            void this.loadAttachmentPreviews(restored);
+            this.applySelection(restored);
             this.message = 'Meeting restored';
         } catch {
             operationError = 'The note could not be restored. The undo window may have expired.';
@@ -360,7 +486,7 @@ export class NotesWorkspace implements OnInit, OnDestroy {
     async upload(event: Event) {
         const input = event.target as HTMLInputElement;
         const file = input.files?.[0];
-        if (!file || !this.selected) return;
+        if (!file || !this.selected || !this.canEdit) return;
         if (file.size > 20 * 1024 * 1024) {
             this.error = 'Choose a file no larger than 20 MB.';
             input.value = '';
@@ -387,7 +513,7 @@ export class NotesWorkspace implements OnInit, OnDestroy {
     }
 
     async removeFile(a: Attachment) {
-        if (!this.selected || !window.confirm(`Remove ${a.filename}?`)) return;
+        if (!this.selected || !this.canEdit || !window.confirm(`Remove ${a.filename}?`)) return;
         this.cancelListWork();
         let operationError = '';
         this.busy = true;
@@ -404,7 +530,7 @@ export class NotesWorkspace implements OnInit, OnDestroy {
     }
 
     async addActionItem() {
-        if (!this.selected || !this.newActionItem.text.trim() || this.busy) return;
+        if (!this.selected || !this.canEdit || !this.newActionItem.text.trim() || this.busy) return;
         this.cancelListWork();
         let operationError = '';
         this.busy = true;
@@ -427,7 +553,7 @@ export class NotesWorkspace implements OnInit, OnDestroy {
     }
 
     async toggleActionItem(item: ActionItem) {
-        if (this.busy) return;
+        if (!this.canEdit || this.busy) return;
         this.cancelListWork();
         let operationError = '';
         this.busy = true;
@@ -443,7 +569,7 @@ export class NotesWorkspace implements OnInit, OnDestroy {
     }
 
     async removeActionItem(item: ActionItem) {
-        if (!this.selected || this.busy) return;
+        if (!this.selected || !this.canEdit || this.busy) return;
         this.cancelListWork();
         let operationError = '';
         this.busy = true;

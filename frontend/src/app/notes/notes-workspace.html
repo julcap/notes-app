@@ -38,7 +38,9 @@
                 <div *ngIf="loading" class="empty-small">Loading your notes…</div>
                 <button *ngFor="let n of notes" class="note-card" [class.active]="selected?.id===n.id"
                         (click)="select(n)" [disabled]="busy">
-                    <div class="card-date">{{ n.meeting_date | date:'MMM d, yyyy' }} <span *ngIf="n.attachments.length">↗ {{ n.attachments.length }}</span>
+                    <div class="card-date">{{ n.meeting_date | date:'MMM d, yyyy' }}
+                        <span *ngIf="!n.is_owner">Shared · {{ n.effective_permission }}</span>
+                        <span *ngIf="n.attachments.length">↗ {{ n.attachments.length }}</span>
                     </div>
                     <h3>{{ n.title }}</h3>
                     <p>{{ n.content || 'No notes yet.' }}</p>
@@ -71,7 +73,7 @@
                         <div class="form-meta"><label>Date<input type="date" name="date"
                                                                  [(ngModel)]="draft.meeting_date"
                                                                  required></label><label>Scheduled time (optional)<input
-                                type="datetime-local" name="scheduledAt" [(ngModel)]="draft.scheduled_at"></label><label>Attendees<input
+                                type="datetime-local" name="scheduledAt" [(ngModel)]="draft.scheduled_at" [disabled]="!!selected && !isOwner"></label><label>Attendees<input
                                 name="attendees" placeholder="e.g. Alex, Jordan, you" [(ngModel)]="draft.attendees"
                                 maxlength="1000"></label></div>
                         <label class="field-label" id="content-label">Notes</label>
@@ -89,11 +91,49 @@
                                         [disabled]="busy">Export Markdown</button>
                                 <button class="text-btn" data-export-format="pdf" (click)="exportNote('pdf')"
                                         [disabled]="busy">Export PDF</button>
-                                <button class="text-btn danger" (click)="remove()" [disabled]="busy">Delete
+                                <button *ngIf="isOwner" class="text-btn" data-action="share-note" (click)="openSharing()"
+                                        [disabled]="busy">Share</button>
+                                <button *ngIf="isOwner" class="text-btn danger" data-action="delete-note" (click)="remove()" [disabled]="busy">Delete
                                 </button>
-                                <button class="secondary" (click)="edit()" [disabled]="busy">✎ &nbsp; Edit note</button>
+                                <button *ngIf="canEdit" class="secondary" data-action="edit-note" (click)="edit()" [disabled]="busy">✎ &nbsp; Edit note</button>
                             </div>
                         </div>
+
+                        <section *ngIf="sharingOpen && isOwner" class="sharing-panel" aria-label="Sharing settings">
+                            <div class="attachment-heading"><h4>Collaborators <span>{{ shares.length }}</span></h4>
+                                <button class="text-btn" (click)="sharingOpen=false">Close</button></div>
+                            <div *ngFor="let share of shares" class="file-row">
+                                <span>{{ share.display_name || share.email }} <small>{{ share.email }}</small></span>
+                                <select [ngModel]="share.permission"
+                                        (ngModelChange)="updateShare(share, $event)" [disabled]="busy"
+                                        [attr.aria-label]="'Permission for '+share.email">
+                                    <option value="view">Can view</option>
+                                    <option value="edit">Can edit</option>
+                                </select>
+                                <button (click)="removeShare(share)" [disabled]="busy"
+                                        [attr.aria-label]="'Remove '+share.email">×</button>
+                            </div>
+                            <form class="action-item-form" (ngSubmit)="addShare()">
+                                <input type="email" name="share-email" [(ngModel)]="shareEmail"
+                                       placeholder="Verified user email" aria-label="Sharing recipient email" required>
+                                <select name="share-permission" [(ngModel)]="sharePermission" aria-label="Sharing permission">
+                                    <option value="view">Can view</option>
+                                    <option value="edit">Can edit</option>
+                                </select>
+                                <button class="secondary" type="submit" [disabled]="busy || !shareEmail.trim()">Share</button>
+                            </form>
+                            <div *ngIf="sharingContacts.length" class="action-item-form">
+                                <span>Previous recipients:</span>
+                                <span *ngFor="let contact of sharingContacts" class="sharing-contact">{{ contact.email }}</span>
+                                <select [(ngModel)]="previousPermission" aria-label="Previous recipients permission">
+                                    <option value="view">Can view</option>
+                                    <option value="edit">Can edit</option>
+                                </select>
+                                <button class="secondary" type="button" (click)="shareWithPrevious()" [disabled]="busy">
+                                    Review and share with previous recipients
+                                </button>
+                            </div>
+                        </section>
 
                         <h2>{{ n.title }}</h2>
                         <div class="detail-meta">
@@ -107,7 +147,7 @@
                                            [source]="n.content || 'No notes added yet. Edit this meeting to capture the conversation.'"></markdown-renderer>
                         <div class="attachments">
                             <div class="attachment-heading"><h4>Attachments <span>{{ n.attachments.length }}</span></h4>
-                                <label class="text-btn upload" [class.disabled]="busy">＋ Add file<input type="file"
+                                <label *ngIf="canEdit" class="text-btn upload" [class.disabled]="busy">＋ Add file<input type="file"
                                                                                                         (change)="upload($event)"
                                                                                                         [disabled]="busy"
                                                                                                         aria-label="Upload attachment"></label>
@@ -124,7 +164,7 @@
                                     <button class="file-download" (click)="downloadFile(a)"
                                             [attr.aria-label]="'Download '+a.filename">{{ a.filename }}
                                         <small>{{ a.size / 1024 | number:'1.0-1' }} KB</small></button>
-                                    <button (click)="removeFile(a)" [disabled]="busy"
+                                    <button *ngIf="canEdit" (click)="removeFile(a)" [disabled]="busy"
                                             [attr.aria-label]="'Remove '+a.filename">×
                                     </button>
                                 </div>
@@ -137,19 +177,19 @@
                             </div>
                             <div *ngFor="let item of n.action_items" class="action-item-row">
                                 <input type="checkbox" [checked]="item.done" (change)="toggleActionItem(item)"
-                                       [disabled]="busy" [attr.aria-label]="(item.done ? 'Mark not done: ' : 'Mark done: ') + item.text">
+                                       [disabled]="busy || !canEdit" [attr.aria-label]="(item.done ? 'Mark not done: ' : 'Mark done: ') + item.text">
                                 <div class="action-item-body" [class.done]="item.done">
                                     <span class="action-item-text">{{ item.text }}</span>
                                     <span class="action-item-meta" *ngIf="item.owner_name || item.due_date">{{ item.owner_name
                                         }}<ng-container *ngIf="item.owner_name && item.due_date"> · </ng-container>{{ item.due_date ? ('Due ' + (item.due_date | date:'MMM d')) : '' }}</span>
                                 </div>
-                                <button (click)="removeActionItem(item)" [disabled]="busy"
+                                <button *ngIf="canEdit" (click)="removeActionItem(item)" [disabled]="busy"
                                         [attr.aria-label]="'Remove '+item.text">×
                                 </button>
                             </div>
                             <div *ngIf="!n.action_items.length" class="file-empty">No action items yet. Track the
                                 follow-ups below.</div>
-                            <form class="action-item-form" (ngSubmit)="addActionItem()">
+                            <form *ngIf="canEdit" class="action-item-form" (ngSubmit)="addActionItem()">
                                 <input name="action-item-text" placeholder="Add an action item…"
                                        [(ngModel)]="newActionItem.text" maxlength="500" [disabled]="busy"
                                        aria-label="Action item text">

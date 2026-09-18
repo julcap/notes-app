@@ -15,7 +15,7 @@ body {
     margin: 0
 }
 
-button, input, textarea {
+button, input, textarea, select {
     font: inherit
 }
 
@@ -702,6 +702,34 @@ h4 span {
 .action-item-form input[name="action-item-owner"] {
     flex: 1;
     min-width: 100px
+}
+
+.sharing-panel {
+    margin: 16px 0 24px;
+    padding: 16px;
+    border: 1px solid #dce6dc;
+    border-radius: 8px;
+    background: #fbfcfa
+}
+
+.sharing-panel .file-row > span {
+    flex: 1;
+    overflow-wrap: anywhere
+}
+
+.sharing-panel select, .action-item-form select {
+    border: 1px solid #dce6dc;
+    border-radius: 6px;
+    padding: 8px;
+    color: #3f6046;
+    background: white
+}
+
+.sharing-contact {
+    padding: 5px 8px;
+    border-radius: 12px;
+    background: #e8eee0;
+    font-size: 10px
 }
 
 footer {

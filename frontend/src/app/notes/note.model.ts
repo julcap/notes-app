@@ -24,9 +24,25 @@ export interface Note {
     updated_at: string;
     attachments: Attachment[];
     action_items: ActionItem[];
+    effective_permission: 'owner' | 'edit' | 'view';
+    is_owner: boolean;
 }
 
 export interface NotePage {
     items: Note[];
     total: number;
+}
+
+export interface MeetingShare {
+    user_id: number;
+    email: string;
+    display_name: string;
+    permission: 'view' | 'edit';
+    shared_at: string;
+}
+
+export interface SharingContact {
+    user_id: number;
+    email: string;
+    display_name: string;
 }

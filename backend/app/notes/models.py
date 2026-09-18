@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Computed, Date, DateTime, ForeignKey, Index, String, Text
+from sqlalchemy import Boolean, CheckConstraint, Computed, Date, DateTime, ForeignKey, Index, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import TSVECTOR
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -37,6 +37,7 @@ class Note(Base):
     )
     attachments: Mapped[list['Attachment']] = relationship(cascade='all, delete-orphan', lazy='selectin')
     action_items: Mapped[list['ActionItem']] = relationship(cascade='all, delete-orphan', lazy='selectin', order_by='ActionItem.created_at')
+    shares: Mapped[list['MeetingShare']] = relationship(cascade='all, delete-orphan', lazy='selectin')
 
 
 class Attachment(Base):
@@ -58,3 +59,24 @@ class ActionItem(Base):
     due_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     done: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class MeetingShare(Base):
+    __tablename__ = 'meeting_shares'
+    __table_args__ = (
+        UniqueConstraint('note_id', 'user_id', name='uq_meeting_shares_note_user'),
+        CheckConstraint("permission IN ('view', 'edit')", name='ck_meeting_shares_permission'),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    note_id: Mapped[str] = mapped_column(ForeignKey('notes.id', ondelete='CASCADE'), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey('users.id', ondelete='CASCADE'), index=True)
+    permission: Mapped[str] = mapped_column(String(10))
+    shared_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class SharingContact(Base):
+    __tablename__ = 'sharing_contacts'
+    __table_args__ = (UniqueConstraint('owner_id', 'user_id', name='uq_sharing_contacts_owner_user'),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    owner_id: Mapped[int] = mapped_column(ForeignKey('users.id', ondelete='CASCADE'), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey('users.id', ondelete='CASCADE'), index=True)

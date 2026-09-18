@@ -11,6 +11,7 @@ from .database import Base, db, engine
 from .notes.routes import STORAGE
 from .notes.routes import action_items_router
 from .notes.routes import router as notes_router
+from .notes.sharing import notes_sharing_router, sharing_router
 
 
 @asynccontextmanager
@@ -24,6 +25,8 @@ app.add_middleware(SessionMiddleware, secret_key=SECRET, https_only=SECURE, same
 app.include_router(auth_router)
 app.include_router(notes_router)
 app.include_router(action_items_router)
+app.include_router(notes_sharing_router)
+app.include_router(sharing_router)
 
 @app.middleware('http')
 async def private_responses(request, call_next):

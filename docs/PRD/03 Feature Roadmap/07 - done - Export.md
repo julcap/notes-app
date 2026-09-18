@@ -6,7 +6,7 @@
 
 ## Shipped behavior
 
-- `GET /api/notes/{note_id}/export?format=md|pdf` requires authentication, applies the existing active-owner check, and rejects missing or unsupported formats with `422`.
+- `GET /api/notes/{note_id}/export?format=md|pdf` requires authentication, applies the central note-permission check for owners and `view`/`edit` collaborators, and rejects missing or unsupported formats with `422`.
 - Both formats include title, meeting date, attendees, note content, and every action item's status, owner, and due date. Downloads use sanitized ASCII filenames and `Cache-Control: no-store`.
 - Markdown is returned as UTF-8 `text/markdown`. PDF is rendered directly with ReportLab Platypus, bundled licensed DejaVu Sans, and bundled Noto fallbacks for CJK and emoji; user text is escaped and no markup, URL, attachment, or local-file content is interpreted or fetched.
 - The Angular detail view offers separate Markdown and PDF actions through the authenticated HTTP client, uses the server-provided filename, and downloads through a short-lived object URL.
@@ -23,7 +23,7 @@ There's no way to get a meeting out of the app once it's in.
 
 ## Backend
 
-- New endpoint: `GET /api/notes/{note_id}/export?format=pdf|md`, owner-checked via the existing `get_note()` helper in `backend/app/notes/routes.py`.
+- Endpoint: `GET /api/notes/{note_id}/export?format=pdf|md`, checked through the central note-permission helper; owners and `view`/`edit` collaborators may export live notes.
 - Markdown export: straightforward template — title, date, attendees, content, then a `- [ ]`/`- [x]` list of action items (from `Note.action_items`, already available via the `action_items` relationship added in [01 - done - Action items](./01%20-%20done%20-%20Action%20items.md)).
 - PDF export uses direct ReportLab Platypus rendering with escaped text, DejaVu Sans as the primary font, and bundled Noto fallbacks; it does not invoke a browser or HTML-to-PDF service.
 - Response should be a `FileResponse`/streamed download with an appropriate filename (e.g. `{note.title}.md` / `.pdf`) and content-type, following the pattern already used in `download()` for attachments.
