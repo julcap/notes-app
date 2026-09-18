@@ -17,7 +17,7 @@
 
 Metrics use an in-process Prometheus registry. Run one Uvicorn worker per pod, as the checked-in container does, and sum the same labeled series across backend pods in Prometheus. There is no undocumented Python multiprocess collector or shared counter directory.
 
-To enable a deployment, an operator must first store a non-empty `metrics-token` key in the optional `minutes-observability` Kubernetes Secret, configure an internal scraper to send that bearer token to `http://backend.minutes.svc.cluster.local:8000/metrics`, and then set the protected GitHub environment variable `METRICS_ENABLED=true`. Local Compose accepts the same variables from an uncommitted `.env` file. Keep metrics disabled if no private scraper is configured.
+To enable a deployment, an operator must first store a non-empty `metrics-token` key in the optional `<namespace>-observability` Kubernetes Secret, configure an internal scraper to send that bearer token to `http://backend.<namespace>.svc.cluster.local:8000/metrics`, and then set the protected GitHub environment variable `METRICS_ENABLED=true`. Local Compose accepts the same variables from an uncommitted `.env` file. Keep metrics disabled if no private scraper is configured.
 
 ## Not covered by this file
 

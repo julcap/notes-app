@@ -1,0 +1,40 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ${MIGRATION_JOB_NAME}
+  namespace: ${KUBE_NAMESPACE}
+  labels:
+    app: database-migrations
+    app.kubernetes.io/version: "${IMAGE_SHA}"
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels: {app: database-migrations}
+    spec:
+      serviceAccountName: minutes-backend
+      restartPolicy: Never
+      securityContext: {runAsNonRoot: true, runAsUser: 10001}
+      containers:
+        - name: database-migrations
+          image: ${BACKEND_IMAGE}
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-m", "app.init_db"]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: {name: "${KUBE_NAMESPACE}-secrets", key: database-url}
+            - name: AUTH_SECRET
+              valueFrom:
+                secretKeyRef: {name: "${KUBE_NAMESPACE}-secrets", key: auth-secret}
+            - name: APP_URL
+              value: https://${APP_DOMAIN}
+            - name: COOKIE_SECURE
+              value: 'true'
+          resources:
+            requests: {cpu: 50m, memory: 96Mi}
+            limits: {cpu: 500m, memory: 256Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}

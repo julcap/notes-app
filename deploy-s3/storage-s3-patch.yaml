@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: backend
-  namespace: minutes
+  namespace: ${KUBE_NAMESPACE}
 spec:
   replicas: 2
   strategy:
@@ -27,7 +27,7 @@ apiVersion: batch/v1
 kind: CronJob
 metadata:
   name: purge-deleted-notes
-  namespace: minutes
+  namespace: ${KUBE_NAMESPACE}
 spec:
   jobTemplate:
     spec:
@@ -40,7 +40,7 @@ spec:
               env:
                 - name: DATABASE_URL
                   valueFrom:
-                    secretKeyRef: {name: minutes-secrets, key: database-url}
+                    secretKeyRef: {name: "${KUBE_NAMESPACE}-secrets", key: database-url}
                 - name: STORAGE_BACKEND
                   value: s3
                 - name: S3_BUCKET

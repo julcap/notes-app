@@ -19,7 +19,7 @@
 - Backend: `SENTRY_DSN`, optionally `SENTRY_ENVIRONMENT` and `SENTRY_RELEASE`.
 - Frontend: separate public `FRONTEND_SENTRY_DSN`, optionally the same non-secret environment/release labels.
 - Empty DSNs are the default and perform no SDK initialization or telemetry network activity.
-- Kubernetes reads the backend DSN from the optional `minutes-observability/sentry-dsn` Secret. The frontend DSN is a public GitHub environment variable rendered into container runtime configuration.
+- Kubernetes reads the backend DSN from the optional `<namespace>-observability/sentry-dsn` Secret. The frontend DSN is a public GitHub environment variable rendered into container runtime configuration.
 
 ## Verification boundary
 

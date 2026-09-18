@@ -105,13 +105,13 @@ kubectl kustomize deploy-s3 | envsubst | kubectl apply -f -
 
 Error tracking is disabled unless a DSN is explicitly configured. The backend reads the private `SENTRY_DSN`; the frontend reads the separate public `FRONTEND_SENTRY_DSN` at container startup through `/runtime-config.js`, so rebuilding the Angular bundle is unnecessary and no backend secret enters it. Both sides accept `SENTRY_ENVIRONMENT` and `SENTRY_RELEASE`. Tracing, profiling, replay, log forwarding, and default PII collection remain disabled. Allowlist hooks retain the exception type, scrubbed stack, release/environment, and safe request ID while dropping request URLs, query strings, fragments, headers, cookies, bodies, users, email/IP values, raw note identifiers/content, exception messages, breadcrumb messages, and breadcrumb data.
 
-For local opt-in testing, set those variables in `.env`; leaving either DSN empty guarantees that side never initializes its SDK. Production backend configuration uses the optional `sentry-dsn` key in a `minutes-observability` Kubernetes Secret. `FRONTEND_SENTRY_DSN` is a public GitHub environment variable. Do not add a debug crash route or real credentials to source control. A release is code-complete without live ingestion: an operator must separately approve configuration and verify one scrubbed event in the provider before claiming production monitoring is active.
+For local opt-in testing, set those variables in `.env`; leaving either DSN empty guarantees that side never initializes its SDK. Production backend configuration uses the optional `sentry-dsn` key in an environment-specific `<namespace>-observability` Kubernetes Secret. `FRONTEND_SENTRY_DSN` is a public GitHub environment variable. Do not add a debug crash route or real credentials to source control. A release is code-complete without live ingestion: an operator must separately approve configuration and verify one scrubbed event in the provider before claiming production monitoring is active.
 
 ## Request metrics
 
 Request metrics are disabled unless `METRICS_ENABLED=true`. When enabled, the backend records `http_requests_total` and `http_request_duration_seconds` with only bounded `method`, FastAPI route template, and `status` labels; extension methods collapse to `OTHER`, unmatched routes collapse to `/unmatched`, and health/scrape traffic is excluded. `GET /metrics` requires a non-empty `METRICS_TOKEN` as a bearer token. The public Nginx frontend returns 404 for `/metrics`, and the ingress routes only to that frontend, so an approved scraper must use the private `backend` ClusterIP service.
 
-Run one Uvicorn worker per pod and sum the same labeled series across backend pods in Prometheus. This repository does not configure Python multiprocess metrics. For production, create or update the optional `minutes-observability` Secret with a `metrics-token` key before setting the protected GitHub environment variable `METRICS_ENABLED=true`; leaving the flag false is the secure default. Installing the monitoring services and verifying delivery remain separate operator gates.
+Run one Uvicorn worker per pod and sum the same labeled series across backend pods in Prometheus. This repository does not configure Python multiprocess metrics. For production, create or update the optional `<namespace>-observability` Secret with a `metrics-token` key before setting the protected GitHub environment variable `METRICS_ENABLED=true`; leaving the flag false is the secure default. Installing the monitoring services and verifying delivery remain separate operator gates.
 
 ## Alerting
 
@@ -121,54 +121,46 @@ Alertmanager reads the human webhook URL from an out-of-band secret file, groups
 
 ## EKS deployment
 
-Infrastructure prerequisites:
+The repository defines two isolated deployment targets:
 
-1. An EKS cluster with the AWS Load Balancer Controller and EBS CSI driver, and a `gp3` StorageClass using `WaitForFirstConsumer`.
-2. An external PostgreSQL instance (RDS recommended), reachable from the worker nodes. Require TLS using `?sslmode=require` in DATABASE_URL.
-3. ECR repositories named `minutes-backend` and `minutes-frontend`; worker nodes need permission to pull them.
-4. An ACM certificate and a domain. The default ALB is **internal**; clients need network access to the VPC. Point DNS at the ALB hostname after creation.
-5. An AWS IAM role trusted by GitHub OIDC, scoped to this repository's production environment, with ECR push and EKS access. The runner must reach the cluster API; use a self-hosted runner for private-only endpoints.
+| Target | Trigger | GitHub environment | Kubernetes namespace |
+| --- | --- | --- | --- |
+| staging | successful push to `main`, when repository variable `STAGING_DEPLOY_ENABLED=true` and the environment variable `DEPLOY_ENABLED=true` | `staging` | `minutes-staging` |
+| production | explicit `workflow_dispatch` with the exact SHA of a successful staging deployment | `production` | `minutes-production` |
 
-Create the namespace and provision a Kubernetes Secret named `minutes-secrets` containing the keys `database-url` and `auth-secret`, using your secrets manager or a protected file. Do not commit credentials.
+Pull requests and pushes to `feat/prd-completion` run tests and build both container images with `push: false`; they cannot deploy. A main push can deploy only staging. Production has no push trigger: a dispatch must run from `main`, and the workflow rejects malformed SHAs and SHAs without a successful `Deploy staging` job on `main`. A successful staging job records its exact backend/frontend digest references in an immutable, run-scoped artifact retained for 30 days; older staged SHAs must be staged again before promotion. Production downloads that artifact from the validated staging run, verifies its SHA and digest forms, and checks out the exact commit; it never rebuilds or re-resolves tags. Both ECR repositories must reject mutable tags when staging publishes the images.
+
+Create the `staging` and `production` GitHub Environments before enabling deployment. Configure production with required reviewers and restrict deployment branches to protected `main`, so the environment gate must approve every eligible dispatch. Repository code also rejects non-main dispatch refs, but cannot verify the GitHub Environment settings; reviewer/branch-policy configuration and a first live promotion remain operator gates.
+
+Each environment must have independent values and credentials. Do not copy staging references into production or vice versa:
+
+- a separate EKS cluster or access role and the fixed namespace shown above;
+- a separate PostgreSQL database URL in `<namespace>-secrets` and a separate auth secret;
+- a separate application domain, ACM certificate, and OAuth provider registrations whose callback URLs use that domain, stored in `<namespace>-oauth`;
+- a separate S3 bucket or prefix and an IAM policy restricted to that environment's objects when `STORAGE_BACKEND=s3`;
+- a separate SES sender and pod IAM role;
+- separate purge, reminder, and digest schedules;
+- an optional `<namespace>-observability` secret for the environment's Sentry DSN and metrics token.
+
+Required environment variables are `DEPLOY_ENABLED`, `AWS_REGION`, `AWS_DEPLOY_ROLE_ARN`, `EKS_CLUSTER`, `APP_DOMAIN`, `ACM_CERTIFICATE_ARN`, `SES_FROM_EMAIL`, `SES_ROLE_ARN`, `STORAGE_BACKEND`, `PURGE_SCHEDULE`, `REMINDER_SCHEDULE`, and `DIGEST_SCHEDULE`. S3 mode additionally requires `S3_BUCKET` and `S3_PREFIX`. `FRONTEND_SENTRY_DSN` is public and optional; `METRICS_ENABLED` defaults to `false`. Empty required values fail before deployment.
+
+The workflow serializes staging deployments separately from production promotions, renders every manifest with `deploy/render.sh`, validates it with kubectl's client-side schema handling, and checks the environment-scoped core and OAuth Secrets. It deploys a one-shot Alembic migration Job and waits for completion before applying the application workloads. Backend and frontend images are always the digest references recorded by the successful staging run; `IMAGE_SHA` is used for the migration Job name and Sentry release only.
+
+For an offline review of the templates, supply non-secret placeholder values and run `deploy/render.sh`. The renderer accepts only `staging`/`minutes-staging` or `production`/`minutes-production`, requires an explicit storage backend, 40-character commit SHAs, and sha256 image references, and fails if required settings are absent. The policy and render assertions require Python with PyYAML plus kubectl/kustomize and run with:
 
 ```sh
-kubectl apply -f deploy/namespace.yaml
-kubectl -n minutes create secret generic minutes-secrets --from-file=database-url=/secure/path/database-url --from-file=auth-secret=/secure/path/auth-secret
+python3 -m unittest tests/test_deployment_policy.py -v
 ```
 
-When backend error tracking is approved, create `minutes-observability` out of band with a `sentry-dsn` key. The manifest treats this Secret and key as optional, so an unconfigured deployment remains disabled rather than failing startup.
-
-The file should contain the complete PostgreSQL connection URL with no trailing newline; URL-encode password characters. For manual deployment, export `BACKEND_IMAGE`, `FRONTEND_IMAGE`, `APP_DOMAIN`, `ACM_CERTIFICATE_ARN`, `AWS_REGION`, `SES_FROM_EMAIL`, and `SES_ROLE_ARN`, then:
-
-```sh
-envsubst < deploy/service-account.yaml | kubectl apply -f -
-envsubst < deploy/app.yaml | kubectl apply -f -
-envsubst < deploy/ingress.yaml | kubectl apply -f -
-kubectl -n minutes rollout status deployment/backend
-kubectl -n minutes rollout status deployment/frontend
-```
-
-The default local-storage backend uses a single replica with `Recreate` updates for its EBS volume; updates briefly interrupt API availability. The `purge-deleted-notes` CronJob runs daily at 03:00 UTC, mounts that same upload volume, forbids overlapping Kubernetes Jobs, takes a PostgreSQL advisory lock, and uses required pod affinity so the ReadWriteOnce EBS volume is mounted from the backend node. After an operator-verified migration, the explicit S3 overlay removes those mounts and affinity and enables two rolling backend replicas. `meeting-reminders` runs every minute and `weekly-digests` runs Monday at 09:00 UTC; both use the backend service account for SES and database locks plus persistent keys for normal-run deduplication. SES has no exactly-once idempotency key, so a process crash after send acceptance but before the delivery-row commit can cause one duplicate retry. The frontend has two replicas. The manifests assume x86-64 EKS nodes, matching the GitHub Actions image build.
-
-Authentication and owner checks protect all notes and attachments. The ALB remains internal by default. Configure the production origin, secure cookies, SES, and OAuth secrets as described in AUTH.md before making the service public.
+Infrastructure prerequisites remain an EKS cluster with the AWS Load Balancer Controller (plus EBS CSI and `gp3` storage when local attachment storage is selected), reachable PostgreSQL, immutable `minutes-backend` and `minutes-frontend` ECR repositories, environment-scoped GitHub OIDC roles, ACM certificates, DNS, and secrets created out of band. The workflow does not provision clusters, databases, buckets, DNS, OAuth apps, IAM roles, GitHub Environment rules, or Secrets.
 
 ## GitHub Actions
 
-Push this directory as the repository root. Pull requests and pushes to `main` run the Angular build and PostgreSQL integration tests. To enable deployment after a successful main merge, configure these repository/environment variables:
+The test job runs on pull requests and pushes to `main` or `feat/prd-completion`. It validates deployment policy and both rendered environments, validates monitoring configuration, runs Angular tests/build, and runs the PostgreSQL-backed backend suite. The feature branch also performs non-pushing Docker builds of both images. Main deploys only to staging when explicitly enabled. Production is an explicit promotion of a previously successful staging SHA and is subject to the `production` GitHub Environment approval rules.
 
-| Variable | Purpose |
-| --- | --- |
-| `DEPLOY_ENABLED` | `true` enables deployments |
-| `AWS_REGION` | EKS/ECR region |
-| `AWS_DEPLOY_ROLE_ARN` | GitHub OIDC deploy role |
-| `EKS_CLUSTER` | Existing cluster name |
-| `APP_DOMAIN` | Meeting app hostname |
-| `ACM_CERTIFICATE_ARN` | ALB TLS certificate |
-| `SES_FROM_EMAIL` | SES verified sender |
-| `SES_ROLE_ARN` | EKS service account IAM role permitting SES send |
-| `FRONTEND_SENTRY_DSN` | Optional public browser DSN; empty disables frontend error tracking |
+Local manifests still default to one backend replica and a ReadWriteOnce volume; S3 mode uses `deploy-s3`, removes the volume coupling, and enables two rolling backend replicas. The scheduled jobs retain PostgreSQL advisory locks and persistent delivery keys. SES has no exactly-once idempotency key, so a process crash after send acceptance but before the delivery-row commit can cause one duplicate retry.
 
-Create the `production` GitHub environment and configure its access rules. Images are tagged with the commit SHA. The workflow builds and pushes both images, applies manifests, and waits for rollouts. Infrastructure, DNS, and secrets must already exist; the workflow does not provision the Kubernetes cluster.
+Authentication and owner checks protect all notes and attachments. The ALB remains internal by default. Configure each environment's origin, secure cookies, SES, OAuth registrations, database, and storage boundary before exposing it. Live staging/production resources, GitHub required reviewers, secrets, and a promotion drill are not created or verified by this repository change.
 
 ## Reference
 

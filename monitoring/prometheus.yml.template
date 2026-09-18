@@ -19,7 +19,7 @@ scrape_configs:
       credentials_file: ${METRICS_TOKEN_FILE}
     static_configs:
       - targets:
-          - backend.minutes.svc.cluster.local:8000
+          - backend.${KUBE_NAMESPACE}.svc.cluster.local:8000
 
   - job_name: minutes-health
     metrics_path: /probe

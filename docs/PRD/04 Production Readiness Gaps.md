@@ -16,7 +16,7 @@ Unlike the feature roadmap, most of these aren't optional or sequenced by user v
 - **Would block launch entirely:** app-wide rate limiting, legal pages (blocks social login leaving test mode)
 - **Would erode trust once discovered:** session management UI
 
-The import audit corrected the baseline to 4 of 15 completed items: backend tests, health checks, CI/deploy code, and secrets management. Frontend automated tests, database migrations, S3-compatible attachment storage, structured logging, opt-in error tracking, bounded private request metrics, and opt-in alert configuration are now code-complete, bringing the repository total to 11 of 15. Remaining entries still distinguish repository implementation from any later live provider or production activation gate.
+The import audit corrected the baseline to 4 of 15 completed items: backend tests, health checks, CI/deploy code, and secrets management. Frontend automated tests, database migrations, S3-compatible attachment storage, structured logging, opt-in error tracking, bounded private request metrics, alert configuration, and staging isolation with explicit production promotion are now code-complete, bringing the repository total to 12 of 15. Remaining entries still distinguish repository implementation from any later live provider or production activation gate.
 
 ## Items, in the original doc's section order
 
@@ -30,7 +30,7 @@ The import audit corrected the baseline to 4 of 15 completed items: backend test
 8. ✅ [Metrics](./04%20Production%20Readiness/08%20-%20done%20-%20Metrics.md) — code-complete and disabled by default; live private scraping remains operator-gated
 9. ✅ [Alerting](./04%20Production%20Readiness/09%20-%20done%20-%20Alerting.md) — code-complete with deterministic Prometheus rule tests and an out-of-band Alertmanager receiver; live monitoring deployment and confirmed human firing/resolved receipts remain operator-gated
 10. ✅ [CI pipeline and deploy](./04%20Production%20Readiness/10%20-%20done%20-%20CI%20pipeline%20and%20deploy.md)
-11. ⬜ [Staging environment](./04%20Production%20Readiness/11%20Staging%20environment.md)
+11. ✅ [Staging environment](./04%20Production%20Readiness/11%20-%20done%20-%20Staging%20environment.md) — code-complete with namespaced rendering and staged-SHA-only production promotion; live environments, secrets, required reviewers, and a promotion drill remain operator-gated
 12. ✅ [Secrets management](./04%20Production%20Readiness/12%20-%20done%20-%20Secrets%20management.md)
 13. ⬜ [App-wide rate limiting](./04%20Production%20Readiness/13%20App-wide%20rate%20limiting.md) — the auth-specific slice of this already shipped with the Auth spec
 14. ⬜ [Session management UI](./04%20Production%20Readiness/14%20Session%20management%20UI.md)

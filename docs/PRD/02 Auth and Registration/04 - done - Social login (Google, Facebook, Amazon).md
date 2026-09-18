@@ -36,7 +36,7 @@ All three providers follow the same authorization-code flow:
 
 ## Security
 
-- OAuth client secrets live only in backend environment variables (`minutes-oauth` Kubernetes secret in `deploy/app.yaml`), never shipped to the frontend.
+- OAuth client secrets live only in backend environment variables (`<namespace>-oauth` Kubernetes Secret in `deploy/app.yaml`), never shipped to the frontend.
 - Authlib validates the OAuth `state` parameter on callback.
 - `GET /api/auth/{provider}/login` is rate-limited.
 - An unhandled failure anywhere in the callback rolls back the transaction and redirects to a generic `social_failed` error rather than leaking exception detail.

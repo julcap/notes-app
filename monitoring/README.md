@@ -24,12 +24,13 @@ blackbox_exporter --config.file=monitoring/blackbox.yml --config.check
 amtool check-config monitoring/alertmanager.yml
 ```
 
-Render and validate the Prometheus template only in a protected working directory. `METRICS_TOKEN_FILE` must be an absolute path to a readable file containing the same token configured on the backend; `APP_HEALTH_URL` must be the complete approved HTTPS URL ending in `/api/health`.
+Render and validate the Prometheus template only in a protected working directory. `KUBE_NAMESPACE` must be exactly `minutes-staging` or `minutes-production`; `METRICS_TOKEN_FILE` must be an absolute path to a readable file containing the same token configured on that environment's backend; `APP_HEALTH_URL` must be the complete matching HTTPS URL ending in `/api/health`.
 
 ```sh
 export METRICS_TOKEN_FILE=/etc/prometheus/secrets/metrics-token
 export APP_HEALTH_URL=https://your-approved-host/api/health
-envsubst '${METRICS_TOKEN_FILE} ${APP_HEALTH_URL}' \
+export KUBE_NAMESPACE=minutes-staging
+envsubst '${METRICS_TOKEN_FILE} ${APP_HEALTH_URL} ${KUBE_NAMESPACE}' \
   < monitoring/prometheus.yml.template \
   > /etc/prometheus/prometheus.yml
 promtool check config /etc/prometheus/prometheus.yml
@@ -40,8 +41,8 @@ Before starting Alertmanager, provision `/etc/alertmanager/secrets/human-webhook
 Activation also requires all of the following:
 
 1. Deploy Prometheus, Alertmanager, and Blackbox Exporter in an approved monitoring environment; this repository intentionally does not provision them.
-2. Give Prometheus private network access to `backend.minutes.svc.cluster.local:8000` and Blackbox Exporter network access to the approved application URL.
-3. Set `METRICS_ENABLED=true` for the backend and provide the matching `metrics-token` key in the `minutes-observability` Secret. Keep the flag false until the private scraper and token are ready.
+2. Give Prometheus private network access to `backend.<namespace>.svc.cluster.local:8000` and Blackbox Exporter network access to that environment's approved application URL.
+3. Set `METRICS_ENABLED=true` for the backend and provide the matching `metrics-token` key in `<namespace>-observability`. Keep the flag false until the private scraper and token are ready.
 4. Mount `alerts.yml`, the rendered Prometheus configuration, `blackbox.yml`, the metrics token, `alertmanager.yml`, and the receiver secret at the paths expected by the chosen deployment.
 5. Validate both configurations, reload or restart the services, and confirm all three rules are loaded before running a notification drill.
 
