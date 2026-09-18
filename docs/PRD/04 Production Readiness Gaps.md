@@ -16,7 +16,7 @@ Unlike the feature roadmap, most of these aren't optional or sequenced by user v
 - **Would block launch entirely:** app-wide rate limiting, legal pages (blocks social login leaving test mode)
 - **Would erode trust once discovered:** session management UI
 
-The import audit corrected the baseline to 4 of 15 completed items: backend tests, health checks, CI/deploy code, and secrets management. Frontend automated tests, database migrations, S3-compatible attachment storage, structured logging, opt-in error tracking, bounded private request metrics, alert configuration, staging isolation with explicit production promotion, and PostgreSQL-backed app-wide rate limits are now code-complete, bringing the repository total to 13 of 15. Remaining entries still distinguish repository implementation from any later live provider or production activation gate.
+The import audit corrected the baseline to 4 of 15 completed items: backend tests, health checks, CI/deploy code, and secrets management. All 15 repository items are now code-complete, including public privacy and terms drafts. Live provider activation, public deployment, operator/contact details, legal approval, and OAuth production review remain external gates; repository completion does not imply those gates are cleared.
 
 ## Items, in the original doc's section order
 
@@ -33,8 +33,8 @@ The import audit corrected the baseline to 4 of 15 completed items: backend test
 11. ✅ [Staging environment](./04%20Production%20Readiness/11%20-%20done%20-%20Staging%20environment.md) — code-complete with namespaced rendering and staged-SHA-only production promotion; live environments, secrets, required reviewers, and a promotion drill remain operator-gated
 12. ✅ [Secrets management](./04%20Production%20Readiness/12%20-%20done%20-%20Secrets%20management.md)
 13. ✅ [App-wide rate limiting](./04%20Production%20Readiness/13%20-%20done%20-%20App-wide%20rate%20limiting.md) — shared PostgreSQL counters protect the full API, with tighter upload/export and existing auth limits
-14. ⬜ [Session management UI](./04%20Production%20Readiness/14%20Session%20management%20UI.md)
-15. ⬜ [Legal pages (privacy policy & ToS)](./04%20Production%20Readiness/15%20Legal%20pages%20%28privacy%20policy%20and%20ToS%29.md)
+14. ✅ [Session management UI](./04%20Production%20Readiness/14%20-%20done%20-%20Session%20management%20UI.md) — session metadata, stable refresh identity, single-session revocation, and immediate log-out-everywhere invalidation are code-complete
+15. ✅ [Legal pages (privacy policy & ToS)](./04%20Production%20Readiness/15%20-%20done%20-%20Legal%20pages%20%28privacy%20policy%20and%20ToS%29.md) — public privacy/terms drafts accurately describe implemented behavior; operator/contact fields, legal approval, live publication, and OAuth production review remain external gates
 
 ## Working with this folder
 

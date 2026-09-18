@@ -60,6 +60,9 @@
                 <button class="primary auth-submit" type="submit"
                         [disabled]="busy || form.invalid || ((mode==='register'||mode==='reset') && (!validPassword || password!==confirmation)) || ((mode==='verify'||mode==='reset') && !token)">{{ busy ? 'Please wait…' : mode === 'login' ? 'Sign in' : mode === 'register' ? 'Create account' : mode === 'forgot' ? 'Send reset link' : mode === 'reset' ? 'Set new password' : 'Verify email' }}
                 </button>
+                <p class="legal-consent" *ngIf="mode==='register'">By creating an account, you agree to the
+                    <a routerLink="/terms">Terms of service</a> and acknowledge the
+                    <a routerLink="/privacy">Privacy policy</a>. Both are publication drafts pending operator details and legal review.</p>
                 <p *ngIf="(mode==='verify'||mode==='reset')&&!token">Open the link from your email to continue.</p>
             </form>
             <div *ngIf="mode==='login'" class="social-login">

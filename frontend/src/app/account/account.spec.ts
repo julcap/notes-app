@@ -73,6 +73,13 @@ describe('Account', () => {
         expect(navigate).toHaveBeenCalledOnceWith('/login');
     });
 
+    it('links account settings to the public privacy policy and terms', () => {
+        const links = Array.from(fixture.nativeElement.querySelectorAll('a')) as HTMLAnchorElement[];
+
+        expect(links.some(link => link.getAttribute('href') === '/privacy')).toBeTrue();
+        expect(links.some(link => link.getAttribute('href') === '/terms')).toBeTrue();
+    });
+
     it('disables preference saving until the initial values load', async () => {
         let resolvePreferences!: (value: unknown) => void;
         auth.call.and.returnValue(new Promise(resolve => resolvePreferences = resolve));
@@ -136,5 +143,104 @@ describe('Account', () => {
             reminder_lead_minutes: 45
         });
         expect(component.message).toBe('Notification preferences saved.');
+    });
+
+    it('shows active sessions and marks the current one', async () => {
+        auth.call.and.callFake(async (_method: string, path: string) => {
+            if (path === 'notification-preferences') return {
+                reminders_enabled: false,
+                digest_enabled: false,
+                reminder_lead_minutes: 10
+            };
+            if (path === 'sessions') return [
+                {
+                    id: 12,
+                    current: true,
+                    user_agent: 'Firefox on Linux',
+                    ip_address: '192.0.2.10',
+                    created_at: '2026-09-18T08:00:00Z',
+                    last_used_at: '2026-09-18T08:30:00Z',
+                    expires_at: '2026-09-19T08:00:00Z'
+                },
+                {
+                    id: 9,
+                    current: false,
+                    user_agent: null,
+                    ip_address: null,
+                    created_at: null,
+                    last_used_at: null,
+                    expires_at: '2026-09-19T08:00:00Z'
+                }
+            ];
+            return undefined;
+        });
+        const sessionsFixture = TestBed.createComponent(Account);
+        sessionsFixture.detectChanges();
+        await sessionsFixture.whenStable();
+        sessionsFixture.detectChanges();
+
+        const text = sessionsFixture.nativeElement.textContent;
+        expect(text).toContain('Active sessions');
+        expect(text).toContain('Firefox on Linux');
+        expect(text).toContain('192.0.2.10');
+        expect(text).toContain('Current session');
+        expect(text).toContain('Unknown device');
+    });
+
+    it('shows a retry action when active sessions fail to load', async () => {
+        auth.call.and.callFake(async (_method: string, path: string) => {
+            if (path === 'notification-preferences') return {
+                reminders_enabled: false,
+                digest_enabled: false,
+                reminder_lead_minutes: 10
+            };
+            if (path === 'sessions') throw new Error('network unavailable');
+            return undefined;
+        });
+        const failedFixture = TestBed.createComponent(Account);
+        failedFixture.detectChanges();
+        await failedFixture.whenStable();
+        failedFixture.detectChanges();
+
+        const alert = failedFixture.nativeElement.querySelector('[role="alert"]') as HTMLElement;
+        expect(alert.textContent).toContain('network unavailable');
+        expect(alert.querySelector('button')?.textContent).toContain('Try again');
+    });
+
+    it('confirms and revokes one session before refreshing the list', async () => {
+        component.sessions = [{
+            id: 9,
+            current: false,
+            user_agent: 'Lost laptop',
+            ip_address: '192.0.2.20',
+            created_at: null,
+            last_used_at: null,
+            expires_at: '2026-09-19T08:00:00Z'
+        }];
+        spyOn(window, 'confirm').and.returnValue(true);
+        auth.call.and.callFake(async (method: string, path: string) => {
+            if (method === 'DELETE') return {message: 'Session revoked'};
+            if (path === 'sessions') return [];
+            return undefined;
+        });
+
+        await component.revokeSession(component.sessions[0]);
+
+        expect(window.confirm).toHaveBeenCalled();
+        expect(auth.call).toHaveBeenCalledWith('DELETE', 'sessions/9');
+        expect(component.sessions).toEqual([]);
+        expect(component.message).toBe('Session revoked.');
+    });
+
+    it('confirms logout everywhere and clears local authentication', async () => {
+        spyOn(window, 'confirm').and.returnValue(true);
+        auth.call.and.resolveTo({message: 'Signed out everywhere'});
+        const navigate = spyOn(TestBed.inject(Router), 'navigateByUrl').and.resolveTo(true);
+
+        await component.logoutEverywhere();
+
+        expect(auth.call).toHaveBeenCalledWith('POST', 'logout-all');
+        expect(auth.clear).toHaveBeenCalled();
+        expect(navigate).toHaveBeenCalledOnceWith('/login');
     });
 });

@@ -1,0 +1,198 @@
+<div class="legal-layout">
+    <header class="legal-header">
+        <a class="brand" routerLink="/login"><span class="brand-icon">m.</span> minutes.</a>
+        <nav aria-label="Legal">
+            <a routerLink="/privacy" [attr.aria-current]="isPrivacy ? 'page' : null">Privacy</a>
+            <a routerLink="/terms" [attr.aria-current]="!isPrivacy ? 'page' : null">Terms</a>
+            <a routerLink="/login">Sign in</a>
+        </nav>
+    </header>
+
+    <main id="main-content" class="legal-main">
+        <article *ngIf="isPrivacy; else terms">
+            <div class="eyebrow">LEGAL INFORMATION</div>
+            <h1>Privacy policy</h1>
+            <p class="legal-updated">Last updated September 18, 2026</p>
+            <aside class="legal-draft" aria-label="Publication status">
+                <strong>Publication draft.</strong> Operator and contact details are pending publication approval and legal review.
+                Google, Facebook, and Amazon OAuth production approval is still pending. This page describes the current
+                application behavior; it does not mean those external approvals are complete.
+            </aside>
+
+            <section aria-labelledby="privacy-scope">
+                <h2 id="privacy-scope">Scope</h2>
+                <p>This policy describes information processed by the Minutes meeting-notes application. It covers account,
+                    note, attachment, sharing, session, notification, security, and diagnostic features implemented in this
+                    repository.</p>
+            </section>
+
+            <section aria-labelledby="privacy-collect">
+                <h2 id="privacy-collect">Information the service processes</h2>
+                <ul>
+                    <li><strong>Account and profile:</strong> email address, an optional display name, email-verification state,
+                        pending email changes, sign-in provider, notification preferences, and account timestamps. Local
+                        passwords are stored as password hashes rather than readable passwords.</li>
+                    <li><strong>Social sign-in:</strong> when selected, Google, Facebook, or Amazon supplies a provider account
+                        identifier, email address, name, and available email-verification claim under the requested profile
+                        scopes. Minutes stores the provider and provider account identifier needed to recognize the sign-in.</li>
+                    <li><strong>Security:</strong> encrypted authenticator secrets, hashed one-time backup codes, hashed session
+                        and email tokens, session creation and last-use times, browser user-agent, peer or trusted-proxy-derived
+                        IP address, and rate-limit counters. Active-session device and IP descriptions are approximate.</li>
+                    <li><strong>Meeting content:</strong> titles, note bodies, attendees, meeting and scheduled dates, action
+                        items, owners, due dates, and completion state. Search indexes are derived from note content.</li>
+                    <li><strong>Attachments:</strong> uploaded bytes plus filename, size, detected or supplied content type,
+                        storage key, and upload time. Each attachment is limited to 20 MiB.</li>
+                    <li><strong>Sharing:</strong> the recipient account, recipient email and display name shown to the owner,
+                        view or edit permission, sharing time, and prior-recipient contact records used only when the owner
+                        explicitly confirms re-sharing.</li>
+                    <li><strong>Notifications:</strong> opt-in reminder and weekly-digest settings, scheduling information, and
+                        delivery keys used to avoid duplicate email. Reminder and digest content can include note titles,
+                        scheduled times, and open action items.</li>
+                    <li><strong>Operational signals:</strong> request method, matched route template, response status, duration,
+                        request ID, aggregate counters, and scrubbed error type and code locations. Structured logs omit raw
+                        paths, query strings, request bodies, headers, cookies, IP addresses, emails, note identifiers, and note
+                        content.</li>
+                </ul>
+            </section>
+
+            <section aria-labelledby="privacy-use">
+                <h2 id="privacy-use">How information is used</h2>
+                <p>Information is used to create and secure accounts; authenticate sessions; store, search, display, export,
+                    and delete meeting records; deliver authorized attachments; apply sharing permissions; send email
+                    verification, recovery, reminders, and opted-in digests; enforce rate limits; and diagnose service errors.</p>
+            </section>
+
+            <section aria-labelledby="privacy-share">
+                <h2 id="privacy-share">When information leaves the service</h2>
+                <ul>
+                    <li>People you choose to share a meeting with can access its content and attachments. An editor can change
+                        the meeting, action items, and attachments; a viewer can read and download them. The owner controls and
+                        can revoke that access.</li>
+                    <li>Google, Facebook, or Amazon processes a social sign-in when you choose that provider. Their own privacy
+                        terms govern information they process.</li>
+                    <li>An email delivery provider receives the destination email and transactional message needed to send
+                        verification, recovery, reminder, or digest email.</li>
+                    <li>Attachment bytes may be stored by the configured S3-compatible storage provider. The application can
+                        instead use local storage; the selected live provider is an operator deployment decision.</li>
+                    <li>Sentry receives scrubbed technical error events only if an operator configures a valid DSN. Error
+                        tracking is disabled by default, sends no default PII, and disables tracing, profiling, replay, and log
+                        forwarding.</li>
+                    <li>The frontend currently loads typography from Google Fonts, so a browser can disclose ordinary request
+                        metadata such as its IP address, user-agent, and referring page to Google when fetching those files.</li>
+                </ul>
+                <p>The application does not include advertising trackers, a data-sale feature, or a cookie-consent tracker.</p>
+            </section>
+
+            <section aria-labelledby="privacy-storage">
+                <h2 id="privacy-storage">Storage, security, and retention</h2>
+                <p>Account and meeting records are stored in PostgreSQL. Attachment bytes use local or S3-compatible object
+                    storage. Access tokens expire after 15 minutes. Refresh sessions expire after 24 hours, or up to 30 days
+                    when “Remember me” is selected, and can be revoked individually or all at once.</p>
+                <p>Deleting a meeting hides it immediately and provides a server-enforced undo window of 15 seconds. Deleted
+                    meetings and their attachments are scheduled for permanent purge after 30 days; actual removal depends on
+                    the purge job running successfully.</p>
+                <p><strong>Account deletion is immediate in the application:</strong> it hard-deletes the account, its owned
+                    meetings, attachments, sessions, verification records, and social identities with no application undo
+                    window. Content owned by someone else is not deleted merely because a collaborator deletes their account.</p>
+                <p>Copies in operational backups may retain earlier data after an application deletion until those backups expire or
+                    are rotated. No backup retention period or deletion-from-backup guarantee has been approved for publication,
+                    and a restored backup can temporarily reintroduce data that operations must reconcile.</p>
+            </section>
+
+            <section aria-labelledby="privacy-controls">
+                <h2 id="privacy-controls">Your controls</h2>
+                <p>Account settings lets you update your profile, opt in or out of reminders and weekly digests, review and
+                    revoke active sessions, manage two-factor authentication, and permanently delete your account. Meeting
+                    owners can export notes, revoke collaborators, delete meetings, and use the 15-second undo action.</p>
+            </section>
+
+            <section aria-labelledby="privacy-contact">
+                <h2 id="privacy-contact">Contact and changes</h2>
+                <p>No operator name, postal address, privacy contact, or legally approved policy-change process is currently
+                    published. Those details must be supplied and reviewed before this draft is used for a public launch or an
+                    OAuth production-review submission.</p>
+            </section>
+        </article>
+
+        <ng-template #terms>
+            <article>
+                <div class="eyebrow">LEGAL INFORMATION</div>
+                <h1>Terms of service</h1>
+                <p class="legal-updated">Last updated September 18, 2026</p>
+                <aside class="legal-draft" aria-label="Publication status">
+                    <strong>Publication draft.</strong> Operator identity, legal contact, governing law, and venue are pending
+                    publication approval and legal review. OAuth production approval is still pending. No jurisdiction,
+                    regulatory status, or compliance certification is asserted here.
+                </aside>
+
+                <section aria-labelledby="terms-service">
+                    <h2 id="terms-service">1. The service</h2>
+                    <p>Minutes provides account-based meeting notes, attachments, action items, search, export, reminders,
+                        session controls, and owner-managed collaboration. These terms describe the implemented service while
+                        final operator-specific legal terms remain under review.</p>
+                </section>
+
+                <section aria-labelledby="terms-account">
+                    <h2 id="terms-account">2. Your account</h2>
+                    <p>Provide an email address you control, keep sign-in credentials and backup codes secure, and review active
+                        sessions if a device is lost or shared. You are responsible for actions taken through your account until
+                        its sessions are revoked. Social sign-in also depends on the selected provider's account and terms.</p>
+                </section>
+
+                <section aria-labelledby="terms-content">
+                    <h2 id="terms-content">3. Your content and sharing</h2>
+                    <p>You keep responsibility for the notes and files you upload, including having permission to record,
+                        store, and share them. Do not upload content that is unlawful or infringes another person's rights.</p>
+                    <p>A meeting owner may grant another verified Minutes account permission to <strong>view or edit</strong> a
+                        meeting. Viewers can read and download its attachments. Editors can also change content, action items,
+                        and attachments. Only the owner can delete the meeting or manage sharing. Revoking access stops later
+                        service access but cannot retract copies a recipient already exported or downloaded.</p>
+                </section>
+
+                <section aria-labelledby="terms-use">
+                    <h2 id="terms-use">4. Acceptable use</h2>
+                    <p>Do not use the service to break the law, harm others, upload malware, probe or bypass security controls,
+                        access another person's data without permission, interfere with service operation, or evade rate limits.
+                        Attachment uploads are limited to 20 MiB per file.</p>
+                </section>
+
+                <section aria-labelledby="terms-deletion">
+                    <h2 id="terms-deletion">5. Export, deletion, and retention</h2>
+                    <p>Owners can export a meeting as Markdown or PDF. Meeting deletion has a server-enforced 15-second undo
+                        window, then remains hidden and is scheduled for permanent purge after 30 days. Permanently deleting an
+                        account removes the account and everything it owns immediately from the live application, with no undo.</p>
+                    <p>Operational backups can retain earlier copies until normal rotation. A specific backup-retention period
+                        and restore reconciliation process have not yet been approved for publication.</p>
+                </section>
+
+                <section aria-labelledby="terms-external">
+                    <h2 id="terms-external">6. External services</h2>
+                    <p>Depending on operator configuration and your choices, the service can use Google, Facebook, or Amazon
+                        for sign-in; an email delivery provider; S3-compatible attachment storage; Google Fonts; and scrubbed,
+                        disabled-by-default Sentry error reporting. Those providers apply their own terms and can change or
+                        discontinue their services.</p>
+                </section>
+
+                <section aria-labelledby="terms-availability">
+                    <h2 id="terms-availability">7. Availability and changes</h2>
+                    <p>No service level or support commitment has been published. Final legal review must define any warranty,
+                        liability, service-change, suspension, termination, and notice terms before public launch; this draft
+                        does not invent those commitments.</p>
+                </section>
+
+                <section aria-labelledby="terms-contact">
+                    <h2 id="terms-contact">8. Operator and legal contact</h2>
+                    <p>Operator identity, legal contact, governing law, and venue are pending publication approval. These terms
+                        must not be presented as final, or used to claim OAuth production readiness, until those fields and the
+                        full text have received legal review.</p>
+                </section>
+            </article>
+        </ng-template>
+
+        <footer class="legal-footer">
+            <span>Minutes publication draft</span>
+            <span><a routerLink="/privacy">Privacy policy</a> · <a routerLink="/terms">Terms of service</a> ·
+                <a routerLink="/register">Create account</a></span>
+        </footer>
+    </main>
+</div>

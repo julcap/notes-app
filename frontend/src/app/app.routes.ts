@@ -17,6 +17,8 @@ const AUTH_PAGES: Array<[path: string, mode: string]> = [
 export const routes: Routes = [
     {path: '', component: NotesWorkspace, canActivate: [authGuard], canDeactivate: [leaveNotesGuard]},
     {path: 'account', loadComponent: () => import('./account/account').then(m => m.Account), canActivate: [authGuard]},
+    {path: 'privacy', loadComponent: () => import('./legal/legal-page').then(m => m.LegalPage), data: {document: 'privacy'}},
+    {path: 'terms', loadComponent: () => import('./legal/legal-page').then(m => m.LegalPage), data: {document: 'terms'}},
     ...AUTH_PAGES.map(([path, mode]) => ({path, component: AuthPage, data: {mode}})),
     {path: '**', redirectTo: ''},
 ];

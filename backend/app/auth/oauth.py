@@ -82,7 +82,7 @@ async def social_callback(provider: str, request: Request, tasks: BackgroundTask
         if user.totp_enabled:
             return RedirectResponse(APP_URL + f'/login-2fa#token={mfa_challenge(user, remember)}', status_code=303)
         response = RedirectResponse(APP_URL + '/auth/callback', status_code=303)
-        issue(user, response, session, remember)
+        issue(user, response, session, request, remember)
         log_auth_event('login', 'success', 'oauth')
         return response
     except Exception:

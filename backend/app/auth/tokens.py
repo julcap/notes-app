@@ -3,7 +3,7 @@ import secrets
 from datetime import timedelta
 
 import jwt
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -50,24 +50,40 @@ def cookie(response, raw, csrf, row):
     response.headers['Cache-Control'] = 'no-store'
 
 
-def issue(user, response, session, remember=False):
+def clear_cookies(response):
+    response.delete_cookie('minutes_refresh', path='/api/auth', secure=SECURE, httponly=True, samesite='lax')
+    response.delete_cookie('minutes_csrf', path='/', secure=SECURE, samesite='lax')
+
+
+def touch_session(row, request, *, created=False):
+    timestamp = now()
+    row.user_agent = (request.headers.get('user-agent') or '')[:512] or None
+    row.ip_address = (request.client.host if request.client else '')[:45] or None
+    row.last_used_at = timestamp
+    if created:
+        row.created_at = timestamp
+
+
+def issue(user, response, session, request, remember=False):
     raw, csrf = secrets.token_urlsafe(48), secrets.token_urlsafe(32)
-    row = RefreshToken(user_id=user.id, token_hash=digest(raw), csrf_hash=digest(csrf), remember=remember, expires_at=now() + timedelta(days=30) if remember else now() + timedelta(hours=24))
+    row = RefreshToken(user_id=user.id, token_hash=digest(raw), csrf_hash=digest(csrf), remember=remember, token_version=user.token_version, expires_at=now() + timedelta(days=30) if remember else now() + timedelta(hours=24))
+    touch_session(row, request, created=True)
     session.add(row)
     session.commit()
     cookie(response, raw, csrf, row)
     return {'access_token': access(user, row.id), 'token_type': 'bearer', 'user': profile(user)}
 
 
-def current_user(credentials: HTTPAuthorizationCredentials | None = Depends(bearer), session: Session = Depends(db)):
+def current_user(request: Request, credentials: HTTPAuthorizationCredentials | None = Depends(bearer), session: Session = Depends(db)):
     try:
         if not credentials:
             raise ValueError()
         claims = jwt.decode(credentials.credentials, SECRET, algorithms=['HS256'], issuer='minutes', audience='minutes', options={'require': ['exp', 'sub', 'sid', 'ver', 'type']})
         user = session.get(User, int(claims['sub']))
         row = session.get(RefreshToken, claims['sid'])
-        if claims['type'] != 'access' or not user or user.token_version != claims['ver'] or not row or row.user_id != user.id or row.revoked_at or row.expires_at <= now():
+        if claims['type'] != 'access' or not user or user.token_version != claims['ver'] or not row or row.user_id != user.id or row.token_version != user.token_version or row.revoked_at or row.expires_at <= now():
             raise ValueError()
+        request.state.session_id = row.id
         return user
     except (jwt.InvalidTokenError, ValueError, TypeError):
         raise HTTPException(401, 'Please sign in again', headers={'WWW-Authenticate': 'Bearer'})
