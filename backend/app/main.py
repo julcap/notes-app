@@ -13,6 +13,7 @@ from .metrics import install_metrics
 from .notes.routes import action_items_router
 from .notes.routes import router as notes_router
 from .observability import ObservedFastAPI
+from .rate_limits import ApiRateLimitMiddleware
 from .storage import STORAGE, LocalStorage, storage
 from .notes.sharing import notes_sharing_router, sharing_router
 
@@ -27,6 +28,7 @@ initialize_error_tracking()
 app = ObservedFastAPI(title='Minutes API', lifespan=lifespan)
 install_metrics(app)
 
+app.add_middleware(ApiRateLimitMiddleware)
 app.add_middleware(SessionMiddleware, secret_key=SECRET, https_only=SECURE, same_site='lax', max_age=600)
 app.include_router(auth_router)
 app.include_router(notes_router)

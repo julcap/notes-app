@@ -5,12 +5,13 @@ from pathlib import Path
 from sqlalchemy import select, text
 from sqlalchemy.orm import selectinload
 
-from .database import SessionLocal
+from .database import SessionLocal, now
 from .notes.models import Attachment, Note
 from .storage import FILE_CLEANUP_LOCK_ID, LocalStorage, storage as configured_storage
 
 
 PURGE_RETENTION = timedelta(days=30)
+RATE_LIMIT_CLEANUP_BATCH = 1000
 
 
 def storage_backend(value=None):
@@ -109,9 +110,37 @@ def send_weekly_digests(**kwargs):
     return execute(**kwargs)
 
 
+def cleanup_rate_limits(
+    *,
+    session_factory=SessionLocal,
+    batch_size: int = RATE_LIMIT_CLEANUP_BATCH,
+    current_time: datetime | None = None,
+) -> int:
+    if batch_size < 1:
+        raise ValueError('batch_size must be positive')
+    with session_factory() as session:
+        removed = session.execute(
+            text("""
+DELETE FROM auth_rate_limits
+WHERE key IN (
+    SELECT key
+    FROM auth_rate_limits
+    WHERE expires_at <= :now
+    ORDER BY expires_at, key
+    LIMIT :batch_size
+    FOR UPDATE SKIP LOCKED
+)
+RETURNING key
+"""),
+            {'now': current_time or now(), 'batch_size': batch_size},
+        ).all()
+        session.commit()
+        return len(removed)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog='python -m app.jobs')
-    parser.add_argument('command', choices=['purge-deleted', 'reminders', 'weekly-digest'])
+    parser.add_argument('command', choices=['purge-deleted', 'reminders', 'weekly-digest', 'cleanup-rate-limits'])
     args = parser.parse_args(argv)
     if args.command == 'purge-deleted':
         print(f'Purged {purge_deleted()} deleted note(s).')
@@ -119,6 +148,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f'Sent {send_reminders()} reminder(s).')
     elif args.command == 'weekly-digest':
         print(f'Sent {send_weekly_digests()} weekly digest(s).')
+    elif args.command == 'cleanup-rate-limits':
+        print(f'Removed {cleanup_rate_limits()} expired rate-limit bucket(s).')
     return 0
 
 

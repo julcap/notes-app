@@ -65,6 +65,8 @@ spec:
             - name: METRICS_TOKEN
               valueFrom:
                 secretKeyRef: {name: "${KUBE_NAMESPACE}-observability", key: metrics-token, optional: true}
+            - name: TRUSTED_PROXY_IPS
+              value: "${TRUSTED_PROXY_IPS}"
           envFrom:
             - secretRef:
                 name: ${KUBE_NAMESPACE}-oauth
@@ -139,6 +141,38 @@ spec:
           volumes:
             - name: uploads
               persistentVolumeClaim: {claimName: uploads}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cleanup-rate-limits
+  namespace: ${KUBE_NAMESPACE}
+spec:
+  schedule: '${RATE_LIMIT_CLEANUP_SCHEDULE}'
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels: {app: cleanup-rate-limits}
+        spec:
+          restartPolicy: Never
+          securityContext: {runAsNonRoot: true, runAsUser: 10001}
+          containers:
+            - name: cleanup-rate-limits
+              image: ${BACKEND_IMAGE}
+              command: ["python", "-m", "app.jobs", "cleanup-rate-limits"]
+              env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef: {name: "${KUBE_NAMESPACE}-secrets", key: database-url}
+              resources:
+                requests: {cpu: 10m, memory: 48Mi}
+                limits: {cpu: 100m, memory: 96Mi}
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities: {drop: [ALL]}
 ---
 apiVersion: batch/v1
 kind: CronJob

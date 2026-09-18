@@ -35,7 +35,7 @@ export MAIL_MODE=smtp
 export SMTP_HOST=localhost
 export SMTP_PORT=1025
 python -m app.init_db
-uvicorn app.main:app --reload
+uvicorn app.main:app --reload --no-proxy-headers
 ```
 
 In another terminal:
@@ -62,7 +62,7 @@ Tests use a separate disposable PostgreSQL database. The test container upgrades
 
 ## Architecture
 
-Browser → Angular served by Nginx → `/api` reverse proxy → FastAPI → PostgreSQL and an upload volume.
+Production browser → ALB (`/api` directly to FastAPI, `/` to Angular/Nginx) → PostgreSQL and an attachment store. Local Compose keeps Nginx as the `/api` reverse proxy.
 
 - `frontend/src/main.ts`: bootstraps the standalone root component with `app.config.ts` (providers) and `app.routes.ts` (routes).
 - `frontend/src/app/auth/`: `auth.service.ts` (session state), `auth.guard.ts`, `auth.interceptor.ts`, `user.model.ts`, `error-text.ts`/`password-policy.ts` (small shared helpers), and `auth-page/` (login/register/forgot/reset/verify/login-2fa — one parametrized page component driven by route `data.mode`, plus an inline 2FA-code step when a login response asks for one).
@@ -75,13 +75,14 @@ Browser → Angular served by Nginx → `/api` reverse proxy → FastAPI → Pos
 - `backend/app/observability.py`: allowlisted JSON logging, request-ID context/middleware, safe unhandled-error stacks, and identifier-free auth audit events.
 - `backend/app/error_tracking.py`: opt-in FastAPI Sentry initialization and complete event/breadcrumb allowlisting.
 - `backend/app/metrics.py`: opt-in bounded Prometheus counters/histograms and bearer-protected private exposition.
+- `backend/app/rate_limits.py`: atomic PostgreSQL API/user/IP counters, upload/export sub-limits, accurate retry timing, and explicit trusted-proxy parsing.
 - `monitoring/`: opt-in Prometheus scrape/rule templates, deterministic alert tests, Blackbox Exporter probe configuration, Alertmanager receiver template, and drill runbook.
 - `backend/app/database.py`: SQLAlchemy engine, session factory, declarative base.
 - `backend/app/storage.py`: local and S3-compatible attachment backends, deterministic object keys, and retryable quarantine/restore helpers used by routes, purge, and account deletion.
 - `backend/app/storage_migrate.py`: dry-run-by-default, SHA-256-verified local-to-S3 attachment migration CLI with a JSON-lines retry manifest.
 - `backend/app/auth/`: accounts, sessions and email — `models.py`/`schemas.py` (data), `security.py` (hashing, rate limiting, origin checks), `tokens.py` (JWTs, cookies, dependencies, MFA challenges), `email.py` (SES/SMTP delivery), `totp.py` (TOTP secrets, QR codes, backup codes), `routes.py` (register/login/reset/verify/account management/2FA), `oauth.py` (Google/Facebook/Amazon).
 - `backend/app/notes/`: meeting notes, sharing, and attachments — `models.py`/`schemas.py` (data), `permissions.py` (central owner/edit/view authorization), `sharing.py` (owner-managed collaborators and previous recipients), `attachments.py` (media-type normalization and byte-signature verification), `export.py` plus `assets/` (safe Markdown/PDF rendering and licensed DejaVu/Noto Unicode fonts), and `routes.py` (CRUD, export, 15-second undo, and file upload/download/preview).
-- `backend/app/jobs.py` and `backend/app/notifications/`: internal scheduled-job CLI and notification delivery model/service. `purge-deleted`, `reminders`, and `weekly-digest` use PostgreSQL advisory locks; notification runs also persist unique delivery keys.
+- `backend/app/jobs.py` and `backend/app/notifications/`: internal scheduled-job CLI and notification delivery model/service. `purge-deleted`, `reminders`, and `weekly-digest` use PostgreSQL advisory locks; `cleanup-rate-limits` deletes at most 1,000 expired buckets per run; notification runs also persist unique delivery keys.
 - `backend/app/migrations.py` and `backend/migrations/`: the Alembic upgrade entrypoint and immutable schema revisions. Every schema change must add a revision; `app.init_db` only runs `upgrade head`.
 - `compose.yaml`: local application stack; only the frontend is published, on localhost.
 - `deploy/`: EKS manifests.
@@ -113,6 +114,12 @@ Request metrics are disabled unless `METRICS_ENABLED=true`. When enabled, the ba
 
 Run one Uvicorn worker per pod and sum the same labeled series across backend pods in Prometheus. This repository does not configure Python multiprocess metrics. For production, create or update the optional `<namespace>-observability` Secret with a `metrics-token` key before setting the protected GitHub environment variable `METRICS_ENABLED=true`; leaving the flag false is the secure default. Installing the monitoring services and verifying delivery remain separate operator gates.
 
+## API rate limits
+
+PostgreSQL-backed counters protect every business endpoint under `/api/`: valid access-token users receive 120 requests per minute and unauthenticated or malformed-token requests receive 60 per transport IP. Uploads and exports also have per-user limits of 10 and 20 per minute. Existing tighter 15-minute auth throttles remain separate. Rejections return HTTP 429 with an accurate `Retry-After`; `/api/health` and the private `/metrics` endpoint do not consume business buckets. The scheduled `cleanup-rate-limits` job deletes at most 1,000 expired rows per run and defaults to every five minutes through `RATE_LIMIT_CLEANUP_SCHEDULE`.
+
+Uvicorn proxy-header rewriting is deliberately disabled. The production ingress routes `/api` directly from the ALB to the backend; the Nginx fallback overwrites rather than passes through client-supplied forwarding headers. `X-Forwarded-For` is ignored unless the direct backend peer belongs to the optional `TRUSTED_PROXY_IPS` comma-separated IPv4/IPv6 address or CIDR list. Configure that variable with only the exact ALB source ranges, excluding pod and service CIDRs; leave it empty to trust no proxy. Universal ranges such as `0.0.0.0/0` and `::/0` fail startup because they would let arbitrary clients choose their IP bucket.
+
 ## Alerting
 
 `monitoring/` provides disabled-by-default deployment templates for Prometheus, Blackbox Exporter, and Alertmanager. The rules page on a sustained 5xx ratio above 5% only when at least 20 requests occurred in five minutes, a real HTTP `/api/health` probe failure lasting two minutes, and private backend scrape failure lasting two minutes. The health probe and Prometheus `up` signal are deliberately separate: `probe_success` covers the external HTTP path and database-aware health response, while `up` only covers the metrics scrape path.
@@ -139,10 +146,11 @@ Each environment must have independent values and credentials. Do not copy stagi
 - a separate application domain, ACM certificate, and OAuth provider registrations whose callback URLs use that domain, stored in `<namespace>-oauth`;
 - a separate S3 bucket or prefix and an IAM policy restricted to that environment's objects when `STORAGE_BACKEND=s3`;
 - a separate SES sender and pod IAM role;
-- separate purge, reminder, and digest schedules;
+- separate purge, rate-limit cleanup, reminder, and digest schedules;
+- exact trusted ingress/load-balancer source CIDRs in optional `TRUSTED_PROXY_IPS` when per-client forwarded IP buckets are required;
 - an optional `<namespace>-observability` secret for the environment's Sentry DSN and metrics token.
 
-Required environment variables are `DEPLOY_ENABLED`, `AWS_REGION`, `AWS_DEPLOY_ROLE_ARN`, `EKS_CLUSTER`, `APP_DOMAIN`, `ACM_CERTIFICATE_ARN`, `SES_FROM_EMAIL`, `SES_ROLE_ARN`, `STORAGE_BACKEND`, `PURGE_SCHEDULE`, `REMINDER_SCHEDULE`, and `DIGEST_SCHEDULE`. S3 mode additionally requires `S3_BUCKET` and `S3_PREFIX`. `FRONTEND_SENTRY_DSN` is public and optional; `METRICS_ENABLED` defaults to `false`. Empty required values fail before deployment.
+Required environment variables are `DEPLOY_ENABLED`, `AWS_REGION`, `AWS_DEPLOY_ROLE_ARN`, `EKS_CLUSTER`, `APP_DOMAIN`, `ACM_CERTIFICATE_ARN`, `SES_FROM_EMAIL`, `SES_ROLE_ARN`, `STORAGE_BACKEND`, `PURGE_SCHEDULE`, `REMINDER_SCHEDULE`, and `DIGEST_SCHEDULE`. S3 mode additionally requires `S3_BUCKET` and `S3_PREFIX`. `FRONTEND_SENTRY_DSN`, `TRUSTED_PROXY_IPS`, and `RATE_LIMIT_CLEANUP_SCHEDULE` are optional; rate-limit cleanup defaults to every five minutes and `METRICS_ENABLED` defaults to `false`. Empty required values fail before deployment.
 
 The workflow serializes staging deployments separately from production promotions, renders every manifest with `deploy/render.sh`, validates it with kubectl's client-side schema handling, and checks the environment-scoped core and OAuth Secrets. It deploys a one-shot Alembic migration Job and waits for completion before applying the application workloads. Backend and frontend images are always the digest references recorded by the successful staging run; `IMAGE_SHA` is used for the migration Job name and Sentry release only.
 

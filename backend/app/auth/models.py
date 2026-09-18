@@ -64,7 +64,7 @@ class RateBucket(Base):
     __tablename__ = 'auth_rate_limits'
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
     hits: Mapped[int] = mapped_column(default=0)
-    expires_at: Mapped[object] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[object] = mapped_column(DateTime(timezone=True), index=True)
 
 
 class BackupCode(Base):

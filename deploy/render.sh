@@ -32,6 +32,23 @@ fi
 
 export FRONTEND_SENTRY_DSN="${FRONTEND_SENTRY_DSN:-}"
 export METRICS_ENABLED="${METRICS_ENABLED:-false}"
+export TRUSTED_PROXY_IPS="${TRUSTED_PROXY_IPS:-}"
+export RATE_LIMIT_CLEANUP_SCHEDULE="${RATE_LIMIT_CLEANUP_SCHEDULE:-*/5 * * * *}"
+if [[ "$RATE_LIMIT_CLEANUP_SCHEDULE" == *$'\n'* ]]; then
+  printf 'RATE_LIMIT_CLEANUP_SCHEDULE must be a five-field cron expression\n' >&2
+  exit 2
+fi
+read -r -a rate_limit_schedule_fields <<< "$RATE_LIMIT_CLEANUP_SCHEDULE"
+if [ "${#rate_limit_schedule_fields[@]}" -ne 5 ]; then
+  printf 'RATE_LIMIT_CLEANUP_SCHEDULE must be a five-field cron expression\n' >&2
+  exit 2
+fi
+for field in "${rate_limit_schedule_fields[@]}"; do
+  if [[ ! "$field" =~ ^[[:alnum:]*/?,#LW-]+$ ]]; then
+    printf 'RATE_LIMIT_CLEANUP_SCHEDULE contains an invalid cron field\n' >&2
+    exit 2
+  fi
+done
 export SENTRY_RELEASE="$IMAGE_SHA"
 export MIGRATION_JOB_NAME="database-migrations-${IMAGE_SHA:0:12}"
 export STORAGE_BACKEND

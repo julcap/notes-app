@@ -58,7 +58,10 @@ def test_empty_database_upgrade_creates_current_schema():
         'users',
     }
     assert {column['name']: column['nullable'] for column in schema.get_columns('notes')}['owner_id'] is False
-    assert revision(database) == '20260918_0007'
+    assert 'ix_auth_rate_limits_expires_at' in {
+        index['name'] for index in schema.get_indexes('auth_rate_limits')
+    }
+    assert revision(database) == '20260918_0008'
     database.dispose()
 
 
@@ -96,7 +99,7 @@ def test_current_schema_adoption_preserves_populated_rows():
         assert connection.execute(text('SELECT title FROM notes')).scalar_one() == 'Kept note'
         assert connection.execute(text('SELECT filename FROM attachments')).scalar_one() == 'kept.txt'
         assert connection.execute(text('SELECT text FROM action_items')).scalar_one() == 'Keep this'
-    assert revision(database) == '20260918_0007'
+    assert revision(database) == '20260918_0008'
     database.dispose()
 
 
@@ -151,7 +154,7 @@ def test_known_ownerless_legacy_schema_is_migrated_without_claiming_notes():
                     INSERT INTO notes (id, owner_id, title, content, attendees, meeting_date, created_at, updated_at)
                     VALUES ('new-ownerless', NULL, 'Rejected', '', '', current_date, now(), now())
                 """))
-    assert revision(database) == '20260918_0007'
+    assert revision(database) == '20260918_0008'
     database.dispose()
 
 
@@ -175,7 +178,7 @@ def test_repeated_upgrade_is_a_no_op():
     upgrade_database(DATABASE_URL)
 
     database = create_engine(DATABASE_URL)
-    assert revision(database) == '20260918_0007'
+    assert revision(database) == '20260918_0008'
     database.dispose()
 
 
@@ -220,7 +223,7 @@ def test_full_text_search_migration_downgrade_and_upgrade_round_trip():
     command.upgrade(migration_config(), 'head')
     assert 'search_vector' in {column['name'] for column in inspect(database).get_columns('notes')}
     assert 'ix_notes_search_vector' in {index['name'] for index in inspect(database).get_indexes('notes')}
-    assert revision(database) == '20260918_0007'
+    assert revision(database) == '20260918_0008'
     database.dispose()
 
 
@@ -235,7 +238,7 @@ def test_soft_delete_migration_adds_nullable_timezone_column_and_index():
     assert deleted_at['nullable'] is True
     assert deleted_at['type'].timezone is True
     assert 'ix_notes_deleted_at' in indexes
-    assert revision(database) == '20260918_0007'
+    assert revision(database) == '20260918_0008'
     database.dispose()
 
 
@@ -276,7 +279,7 @@ def test_attachment_content_type_migration_defaults_legacy_rows():
         )).scalar_one()
     assert content_type['nullable'] is False
     assert legacy_type == 'application/octet-stream'
-    assert revision(database) == '20260918_0007'
+    assert revision(database) == '20260918_0008'
     database.dispose()
 
 
@@ -297,10 +300,10 @@ def test_concurrent_upgrade_is_serialized():
     ]
     results = [process.communicate(timeout=30) for process in processes]
 
-    assert [process.returncode for process in processes] == [0, 0]
+    assert [process.returncode for process in processes] == [0, 0], results
     assert all('Traceback' not in stderr for _, stderr in results)
     database = create_engine(DATABASE_URL)
-    assert revision(database) == '20260918_0007'
+    assert revision(database) == '20260918_0008'
     assert 'notes' in inspect(database).get_table_names()
     database.dispose()
 
@@ -325,7 +328,7 @@ def test_notification_migration_adds_preferences_schedule_and_delivery_keys():
     assert note_columns['scheduled_at']['type'].timezone is True
     assert delivery_columns['delivery_key']['nullable'] is False
     assert any(item['column_names'] == ['delivery_key'] for item in delivery_uniques)
-    assert revision(database) == '20260918_0007'
+    assert revision(database) == '20260918_0008'
     database.dispose()
 
 
@@ -348,7 +351,7 @@ def test_sharing_migration_has_permissions_uniqueness_and_cascading_foreign_keys
     assert all(item['options'].get('ondelete') == 'CASCADE' for item in share_foreign_keys)
     assert any(item['column_names'] == ['owner_id', 'user_id'] for item in contact_uniques)
     assert all(item['options'].get('ondelete') == 'CASCADE' for item in contact_foreign_keys)
-    assert revision(database) == '20260918_0007'
+    assert revision(database) == '20260918_0008'
     database.dispose()
 
 
@@ -393,5 +396,5 @@ def test_attachment_object_key_migration_preserves_legacy_rows():
         )).scalar_one_or_none()
     assert columns['object_key']['nullable'] is True
     assert object_key is None
-    assert revision(database) == '20260918_0007'
+    assert revision(database) == '20260918_0008'
     database.dispose()

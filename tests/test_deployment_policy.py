@@ -30,6 +30,8 @@ class DeploymentPolicyTests(unittest.TestCase):
             "SES_ROLE_ARN": f"arn:aws:iam::111111111111:role/minutes-{environment}-ses",
             "FRONTEND_SENTRY_DSN": "",
             "METRICS_ENABLED": "false",
+            "TRUSTED_PROXY_IPS": "10.0.0.0/8",
+            "RATE_LIMIT_CLEANUP_SCHEDULE": "*/5 * * * *",
             "STORAGE_BACKEND": storage_backend,
             "S3_BUCKET": f"minutes-{environment}",
             "S3_PREFIX": "attachments/",
@@ -97,6 +99,60 @@ class DeploymentPolicyTests(unittest.TestCase):
             for document in documents:
                 if document["kind"] != "Namespace":
                     self.assertEqual(document["metadata"].get("namespace"), namespace)
+
+    def test_rate_limit_cleanup_and_proxy_policy_are_rendered(self):
+        _, documents = self.render("staging")
+        backend = next(
+            document for document in documents
+            if document["kind"] == "Deployment" and document["metadata"]["name"] == "backend"
+        )
+        backend_env = {
+            item["name"]: item.get("value")
+            for item in backend["spec"]["template"]["spec"]["containers"][0]["env"]
+        }
+        cleanup = next(
+            document for document in documents
+            if document["kind"] == "CronJob" and document["metadata"]["name"] == "cleanup-rate-limits"
+        )
+        ingress = next(document for document in documents if document["kind"] == "Ingress")
+        paths = ingress["spec"]["rules"][0]["http"]["paths"]
+        command = cleanup["spec"]["jobTemplate"]["spec"]["template"]["spec"]["containers"][0]["command"]
+        nginx = (ROOT / "frontend" / "nginx.conf").read_text()
+
+        self.assertEqual(backend_env["TRUSTED_PROXY_IPS"], "10.0.0.0/8")
+        self.assertEqual(command, ["python", "-m", "app.jobs", "cleanup-rate-limits"])
+        self.assertEqual(cleanup["spec"]["schedule"], "*/5 * * * *")
+        self.assertEqual(paths[0]["path"], "/api")
+        self.assertEqual(paths[0]["backend"]["service"]["name"], "backend")
+        self.assertEqual(paths[1]["backend"]["service"]["name"], "frontend")
+        self.assertGreaterEqual(nginx.count("proxy_set_header X-Forwarded-For $remote_addr"), 2)
+        self.assertIn("--no-proxy-headers", (ROOT / "backend" / "Dockerfile").read_text())
+
+    def test_renderer_rejects_an_invalid_rate_limit_cleanup_schedule(self):
+        env = {
+            **os.environ,
+            "DEPLOY_ENVIRONMENT": "staging",
+            "KUBE_NAMESPACE": "minutes-staging",
+            "BACKEND_IMAGE": "registry.example/backend@sha256:" + "a" * 64,
+            "FRONTEND_IMAGE": "registry.example/frontend@sha256:" + "b" * 64,
+            "IMAGE_SHA": "1" * 40,
+            "APP_DOMAIN": "staging.minutes.example",
+            "ACM_CERTIFICATE_ARN": "arn:aws:acm:region:account:certificate/staging",
+            "AWS_REGION": "us-east-1",
+            "SES_FROM_EMAIL": "staging@example.com",
+            "SES_ROLE_ARN": "arn:aws:iam::111111111111:role/staging-ses",
+            "STORAGE_BACKEND": "local",
+            "PURGE_SCHEDULE": "0 3 * * *",
+            "REMINDER_SCHEDULE": "* * * * *",
+            "DIGEST_SCHEDULE": "0 9 * * 1",
+            "RATE_LIMIT_CLEANUP_SCHEDULE": "*/5 * * * *'\nkind: Secret",
+        }
+        result = subprocess.run(
+            ["bash", "deploy/render.sh"], cwd=ROOT, env=env,
+            capture_output=True, text=True,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("RATE_LIMIT_CLEANUP_SCHEDULE", result.stderr)
 
     def test_renderer_fails_closed_when_required_configuration_is_missing(self):
         result = subprocess.run(
