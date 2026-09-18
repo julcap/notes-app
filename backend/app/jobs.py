@@ -84,12 +84,26 @@ def purge_deleted(
         return purged
 
 
+def send_reminders(**kwargs):
+    from .notifications.service import send_reminders as execute
+    return execute(**kwargs)
+
+
+def send_weekly_digests(**kwargs):
+    from .notifications.service import send_weekly_digests as execute
+    return execute(**kwargs)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog='python -m app.jobs')
-    parser.add_argument('command', choices=['purge-deleted'])
+    parser.add_argument('command', choices=['purge-deleted', 'reminders', 'weekly-digest'])
     args = parser.parse_args(argv)
     if args.command == 'purge-deleted':
         print(f'Purged {purge_deleted()} deleted note(s).')
+    elif args.command == 'reminders':
+        print(f'Sent {send_reminders()} reminder(s).')
+    elif args.command == 'weekly-digest':
+        print(f'Sent {send_weekly_digests()} weekly digest(s).')
     return 0
 
 

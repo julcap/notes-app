@@ -14,9 +14,9 @@ Every in-scope item shipped: registration & email verification, login & sessions
 
 → `02 Auth and Registration/`
 
-## 3. [Feature Roadmap (Post-MVP)](./03%20Feature%20Roadmap%20(Post-MVP).md) — 1/9 done
+## 3. [Feature Roadmap (Post-MVP)](./03%20Feature%20Roadmap%20(Post-MVP).md) — 8/9 code-complete
 
-Product depth: what's missing for this to feel like a product, not a demo. Action items shipped 2026-09-17; rich text formatting, search, pagination, soft delete, attachment previews, export, notifications, and sharing/collaboration remain, roughly in build-it-next order.
+Product depth: what's missing for this to feel like a product, not a demo. Action items, rich text formatting, search, pagination, soft delete, attachment previews, export, and notifications are code-complete; sharing/collaboration remains.
 
 → `03 Feature Roadmap/`
 

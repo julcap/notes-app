@@ -42,4 +42,4 @@ Today a meeting belongs to exactly one user and nobody else can see it (`Note.ow
 
 ## Sequencing note
 
-Land this after [02](./02%20-%20done%20-%20Rich%20text%20notes%20formatting.md)–[08](./08%20Notifications%20and%20reminders.md): every other spec in this folder assumes single-owner semantics, and retrofitting shared-access checks into a handful of already-shipped features is more work than building them against single ownership first and adding the permission check as one focused pass at the end.
+Land this after [02](./02%20-%20done%20-%20Rich%20text%20notes%20formatting.md)–[08](./08%20-%20done%20-%20Notifications%20and%20reminders.md): every other spec in this folder assumes single-owner semantics, and retrofitting shared-access checks into a handful of already-shipped features is more work than building them against single ownership first and adding the permission check as one focused pass at the end.

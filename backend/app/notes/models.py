@@ -26,6 +26,7 @@ class Note(Base):
     content: Mapped[str] = mapped_column(Text, default='')
     attendees: Mapped[str] = mapped_column(String(1000), default='')
     meeting_date: Mapped[date] = mapped_column(Date)
+    scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)

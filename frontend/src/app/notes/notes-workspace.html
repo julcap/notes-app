@@ -70,7 +70,8 @@
                                                                                            required maxlength="200">
                         <div class="form-meta"><label>Date<input type="date" name="date"
                                                                  [(ngModel)]="draft.meeting_date"
-                                                                 required></label><label>Attendees<input
+                                                                 required></label><label>Scheduled time (optional)<input
+                                type="datetime-local" name="scheduledAt" [(ngModel)]="draft.scheduled_at"></label><label>Attendees<input
                                 name="attendees" placeholder="e.g. Alex, Jordan, you" [(ngModel)]="draft.attendees"
                                 maxlength="1000"></label></div>
                         <label class="field-label" id="content-label">Notes</label>
@@ -96,7 +97,9 @@
 
                         <h2>{{ n.title }}</h2>
                         <div class="detail-meta">
-                            <span>▦ &nbsp; {{ n.meeting_date | date:'EEEE, MMMM d, yyyy' }}</span><span>♧ &nbsp; {{ n.attendees || 'Just you' }}</span>
+                            <span>▦ &nbsp; {{ n.meeting_date | date:'EEEE, MMMM d, yyyy' }}</span>
+                            <span *ngIf="n.scheduled_at">◷ &nbsp; {{ n.scheduled_at | date:'EEEE, MMMM d, yyyy, h:mm a' }}</span>
+                            <span>♧ &nbsp; {{ n.attendees || 'Just you' }}</span>
                         </div>
                         <div class="divider"></div>
                         <div class="section-label">THE CONVERSATION</div>

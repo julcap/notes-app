@@ -11,6 +11,7 @@ import {NavRail} from '../shell/nav-rail';
 import {ActionItem, Attachment, Note, NotePage} from './note.model';
 import {MarkdownEditor} from './markdown-editor';
 import {MarkdownRenderer} from './markdown-renderer';
+import {localDateTimeToUtc, utcToLocalDateTime} from './scheduling';
 
 interface AttachmentPreview {
     kind: 'image' | 'pdf';
@@ -108,7 +109,8 @@ export class NotesWorkspace implements OnInit, OnDestroy {
             title: '',
             content: '',
             attendees: '',
-            meeting_date: new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10)
+            meeting_date: new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10),
+            scheduled_at: ''
         };
     }
 
@@ -125,7 +127,13 @@ export class NotesWorkspace implements OnInit, OnDestroy {
     }
 
     fields(n: Note) {
-        return {title: n.title, content: n.content, attendees: n.attendees, meeting_date: n.meeting_date};
+        return {
+            title: n.title,
+            content: n.content,
+            attendees: n.attendees,
+            meeting_date: n.meeting_date,
+            scheduled_at: utcToLocalDateTime(n.scheduled_at)
+        };
     }
 
     @HostListener('window:beforeunload', ['$event']) unload(e: BeforeUnloadEvent) {
@@ -258,7 +266,11 @@ export class NotesWorkspace implements OnInit, OnDestroy {
         this.busy = true;
         this.error = '';
         try {
-            const n = await firstValueFrom(this.selected ? this.http.put<Note>('/api/notes/' + this.selected.id, this.draft) : this.http.post<Note>('/api/notes', this.draft));
+            const payload = {
+                ...this.draft,
+                scheduled_at: localDateTimeToUtc(this.draft.scheduled_at)
+            };
+            const n = await firstValueFrom(this.selected ? this.http.put<Note>('/api/notes/' + this.selected.id, payload) : this.http.post<Note>('/api/notes', payload));
             this.selected = n;
             void this.loadAttachmentPreviews(n);
             this.editing = false;

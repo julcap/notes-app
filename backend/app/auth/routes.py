@@ -14,7 +14,7 @@ from .config import APP_URL, SECURE
 from .email import deliver_email, email_link
 from .models import BackupCode, EmailToken, Identity, RefreshToken, User
 from .router import router
-from .schemas import ChangePassword, DeleteAccount, EmailInput, Login, Login2FA, ProfileUpdate, Registration, Reset, TokenInput, TotpCode, TotpDisable
+from .schemas import ChangePassword, DeleteAccount, EmailInput, Login, Login2FA, NotificationPreferences, ProfileUpdate, Registration, Reset, TokenInput, TotpCode, TotpDisable
 from .security import DUMMY_HASH, check_password, digest, limit, password_hash, same_origin
 from .tokens import access, consume, consume_mfa, cookie, current_user, issue, mfa_challenge, profile, refresh_row
 
@@ -94,6 +94,31 @@ def logout(request: Request, response: Response, session: Session = Depends(db))
 @router.get('/me')
 def me(user: User = Depends(current_user)):
     return profile(user)
+
+
+def notification_preferences_for(user):
+    return {
+        'reminders_enabled': user.reminders_enabled,
+        'digest_enabled': user.digest_enabled,
+        'reminder_lead_minutes': user.reminder_lead_minutes,
+    }
+
+
+@router.get('/notification-preferences', response_model=NotificationPreferences)
+def get_notification_preferences(user: User = Depends(current_user)):
+    return notification_preferences_for(user)
+
+
+@router.put('/notification-preferences', response_model=NotificationPreferences, dependencies=[Depends(same_origin)])
+def update_notification_preferences(
+    data: NotificationPreferences,
+    user: User = Depends(current_user),
+    session: Session = Depends(db),
+):
+    for key, value in data.model_dump().items():
+        setattr(user, key, value)
+    session.commit()
+    return notification_preferences_for(user)
 
 
 @router.post('/forgot-password', dependencies=[Depends(same_origin)])

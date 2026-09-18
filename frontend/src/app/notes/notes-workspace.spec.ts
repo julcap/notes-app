@@ -26,6 +26,7 @@ const note: Note = {
     content: 'Decisions',
     attendees: 'Reader',
     meeting_date: '2026-09-17',
+    scheduled_at: null,
     updated_at: '2026-09-17T00:00:00Z',
     attachments: [],
     action_items: []
@@ -235,13 +236,14 @@ describe('NotesWorkspace', () => {
             title: 'Planning',
             content: 'Decisions',
             attendees: 'Reader',
-            meeting_date: '2026-09-17'
+            meeting_date: '2026-09-17',
+            scheduled_at: ''
         };
 
         const pending = component.save();
         const request = http.expectOne('/api/notes');
         expect(request.request.method).toBe('POST');
-        expect(request.request.body).toEqual(component.draft);
+        expect(request.request.body).toEqual({...component.draft, scheduled_at: null});
         request.flush(note);
         await Promise.resolve();
         http.expectOne(item => item.url === '/api/notes').flush({items: [note], total: 1});
@@ -250,6 +252,24 @@ describe('NotesWorkspace', () => {
         expect((component.selected as Note | null)?.id).toBe(note.id);
         expect(component.editing).toBeFalse();
         expect(component.message).toBe('All changes saved');
+    });
+
+    it('converts a local scheduled time to UTC before saving', async () => {
+        component.selected = null;
+        component.editing = true;
+        component.draft = {
+            ...component.blank(),
+            title: 'Scheduled planning',
+            scheduled_at: '2026-07-08T01:30'
+        };
+
+        const pending = component.save();
+        const request = http.expectOne('/api/notes');
+        expect(request.request.body.scheduled_at).toBe(new Date('2026-07-08T01:30').toISOString());
+        request.flush({...note, title: 'Scheduled planning', scheduled_at: request.request.body.scheduled_at});
+        await Promise.resolve();
+        http.expectOne(item => item.url === '/api/notes').flush({items: [note], total: 1});
+        await pending;
     });
 
     it('persists markdown unchanged and renders the saved note', async () => {

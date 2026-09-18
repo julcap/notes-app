@@ -20,6 +20,7 @@ export interface Note {
     content: string;
     attendees: string;
     meeting_date: string;
+    scheduled_at: string | null;
     updated_at: string;
     attachments: Attachment[];
     action_items: ActionItem[];

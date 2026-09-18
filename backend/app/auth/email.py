@@ -23,7 +23,14 @@ def send_email(recipient, subject, body):
         with smtplib.SMTP(os.getenv('SMTP_HOST', 'mailpit'), int(os.getenv('SMTP_PORT', '1025')), timeout=10) as smtp:
             smtp.send_message(message)
     else:
-        boto3.client('ses', region_name=os.getenv('AWS_REGION', 'eu-west-1')).send_email(Source=os.environ['SES_FROM_EMAIL'], Destination={'ToAddresses': [recipient]}, Message={'Subject': {'Data': subject}, 'Body': {'Text': {'Data': body}}})
+        boto3.client('ses', region_name=os.getenv('AWS_REGION', 'eu-west-1')).send_email(
+            Source=os.environ['SES_FROM_EMAIL'],
+            Destination={'ToAddresses': [recipient]},
+            Message={
+                'Subject': {'Data': subject, 'Charset': 'UTF-8'},
+                'Body': {'Text': {'Data': body, 'Charset': 'UTF-8'}},
+            },
+        )
 
 
 def deliver_email(recipient, subject, body):

@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -8,6 +8,7 @@ class NoteInput(BaseModel):
     content: str = Field(default='', max_length=100000)
     attendees: str = Field(default='', max_length=1000)
     meeting_date: date
+    scheduled_at: datetime | None = None
 
     @field_validator('title')
     @classmethod
@@ -15,6 +16,13 @@ class NoteInput(BaseModel):
         if not value.strip():
             raise ValueError('Title cannot be blank')
         return value.strip()
+
+    @field_validator('scheduled_at')
+    @classmethod
+    def scheduled_time_is_timezone_aware(cls, value):
+        if value is not None and value.tzinfo is None:
+            raise ValueError('Scheduled time must include a timezone')
+        return value.astimezone(timezone.utc) if value is not None else None
 
 
 class AttachmentOut(BaseModel):

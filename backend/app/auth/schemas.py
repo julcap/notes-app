@@ -74,3 +74,9 @@ class ProfileUpdate(BaseModel):
 class DeleteAccount(BaseModel):
     password: str = Field(default='', max_length=1000)
     confirmation: str = Field(default='', max_length=50)
+
+
+class NotificationPreferences(BaseModel):
+    reminders_enabled: bool = False
+    digest_enabled: bool = False
+    reminder_lead_minutes: int = Field(default=10, ge=1, le=1440)

@@ -53,6 +53,23 @@
             </section>
 
             <section class="card">
+                <h2>Email notifications</h2>
+                <p>Notifications are off until you opt in. Reminders use each meeting's scheduled time.</p>
+                <form (ngSubmit)="saveNotificationPreferences()" #notificationForm="ngForm">
+                    <label class="checkbox-row"><input type="checkbox" name="remindersEnabled"
+                                                       [(ngModel)]="remindersEnabled" [disabled]="notificationPreferencesLoading"> Meeting starting soon reminders</label>
+                    <label *ngIf="remindersEnabled">Remind me before the meeting
+                        <input type="number" name="reminderLeadMinutes" [(ngModel)]="reminderLeadMinutes"
+                               required min="1" max="1440" [disabled]="notificationPreferencesLoading"> minutes
+                    </label>
+                    <label class="checkbox-row"><input type="checkbox" name="digestEnabled"
+                                                       [(ngModel)]="digestEnabled" [disabled]="notificationPreferencesLoading"> Monday weekly digest</label>
+                    <button class="primary auth-submit" type="submit"
+                            [disabled]="busy || notificationPreferencesLoading || notificationForm.invalid">{{ busy ? 'Saving…' : 'Save notification preferences' }}</button>
+                </form>
+            </section>
+
+            <section class="card">
                 <h2>Two-factor authentication <span class="badge" *ngIf="auth.user?.totp_enabled">ENABLED</span></h2>
                 <ng-container *ngIf="!auth.user?.totp_enabled">
                     <ng-container *ngIf="!backupCodes">

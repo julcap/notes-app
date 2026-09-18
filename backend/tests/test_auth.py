@@ -207,6 +207,36 @@ def test_change_password(client):
     assert client.post('/api/auth/change-password',json=good,headers=csrf(client)).status_code==200
     assert client.post('/api/auth/login',json={'email':'test@example.com','password':'NewPassword123'}).status_code==200
 
+
+def test_notification_preferences_default_opt_out_and_validate_lead(client):
+    assert client.get('/api/auth/notification-preferences').json() == {
+        'reminders_enabled': False,
+        'digest_enabled': False,
+        'reminder_lead_minutes': 10,
+    }
+
+    response = client.put(
+        '/api/auth/notification-preferences',
+        json={
+            'reminders_enabled': True,
+            'digest_enabled': True,
+            'reminder_lead_minutes': 45,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()['reminder_lead_minutes'] == 45
+    assert client.get('/api/auth/notification-preferences').json() == response.json()
+    for invalid in (0, 1441):
+        assert client.put(
+            '/api/auth/notification-preferences',
+            json={
+                'reminders_enabled': True,
+                'digest_enabled': False,
+                'reminder_lead_minutes': invalid,
+            },
+        ).status_code == 422
+
 def test_delete_account_cascades_notes_and_attachments(client):
     n=client.post('/api/notes',json=NOTE).json()
     attachment=client.post('/api/notes/'+n['id']+'/attachments',files={'file':('x.txt',b'bye')}).json()

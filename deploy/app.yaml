@@ -146,6 +146,98 @@ spec:
             - name: uploads
               persistentVolumeClaim: {claimName: uploads}
 ---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: meeting-reminders
+  namespace: minutes
+spec:
+  schedule: '* * * * *'
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels: {app: meeting-reminders}
+        spec:
+          serviceAccountName: minutes-backend
+          restartPolicy: Never
+          securityContext: {runAsNonRoot: true, runAsUser: 10001}
+          containers:
+            - name: meeting-reminders
+              image: ${BACKEND_IMAGE}
+              command: ["python", "-m", "app.jobs", "reminders"]
+              env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef: {name: minutes-secrets, key: database-url}
+                - name: AUTH_SECRET
+                  valueFrom:
+                    secretKeyRef: {name: minutes-secrets, key: auth-secret}
+                - name: APP_URL
+                  value: https://${APP_DOMAIN}
+                - name: COOKIE_SECURE
+                  value: 'true'
+                - name: MAIL_MODE
+                  value: ses
+                - name: SES_FROM_EMAIL
+                  value: ${SES_FROM_EMAIL}
+                - name: AWS_REGION
+                  value: ${AWS_REGION}
+              resources:
+                requests: {cpu: 25m, memory: 64Mi}
+                limits: {cpu: 250m, memory: 192Mi}
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities: {drop: [ALL]}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: weekly-digests
+  namespace: minutes
+spec:
+  schedule: '0 9 * * 1'
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels: {app: weekly-digests}
+        spec:
+          serviceAccountName: minutes-backend
+          restartPolicy: Never
+          securityContext: {runAsNonRoot: true, runAsUser: 10001}
+          containers:
+            - name: weekly-digests
+              image: ${BACKEND_IMAGE}
+              command: ["python", "-m", "app.jobs", "weekly-digest"]
+              env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef: {name: minutes-secrets, key: database-url}
+                - name: AUTH_SECRET
+                  valueFrom:
+                    secretKeyRef: {name: minutes-secrets, key: auth-secret}
+                - name: APP_URL
+                  value: https://${APP_DOMAIN}
+                - name: COOKIE_SECURE
+                  value: 'true'
+                - name: MAIL_MODE
+                  value: ses
+                - name: SES_FROM_EMAIL
+                  value: ${SES_FROM_EMAIL}
+                - name: AWS_REGION
+                  value: ${AWS_REGION}
+              resources:
+                requests: {cpu: 25m, memory: 64Mi}
+                limits: {cpu: 250m, memory: 192Mi}
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities: {drop: [ALL]}
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata: {name: frontend, namespace: minutes}

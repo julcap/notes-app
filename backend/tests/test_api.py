@@ -42,6 +42,28 @@ def test_crud_search_and_validation(client):
     assert client.get('/api/notes/'+n['id']).status_code == 404
 
 
+def test_scheduled_time_requires_timezone_and_is_normalized_to_utc(client):
+    payload = {
+        'title': 'DST planning',
+        'content': '',
+        'attendees': '',
+        'meeting_date': '2026-03-08',
+        'scheduled_at': '2026-03-08T01:30:00-05:00',
+    }
+
+    response = client.post('/api/notes', json=payload)
+
+    assert response.status_code == 201
+    assert response.json()['scheduled_at'] == '2026-03-08T06:30:00Z'
+    assert client.post('/api/notes', json={**payload, 'scheduled_at': '2026-03-08T01:30:00'}).status_code == 422
+    updated = client.put(
+        f"/api/notes/{response.json()['id']}",
+        json={**payload, 'scheduled_at': None},
+    )
+    assert updated.status_code == 200
+    assert updated.json()['scheduled_at'] is None
+
+
 def test_soft_delete_hides_note_children_and_preserves_attachment(client, monkeypatch):
     deleted_at = datetime(2026, 9, 17, 12, tzinfo=timezone.utc)
     monkeypatch.setattr(note_routes, 'now', lambda: deleted_at)

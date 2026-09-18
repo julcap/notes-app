@@ -27,6 +27,12 @@ export class Account implements OnInit {
     displayName = '';
     email = '';
 
+    remindersEnabled = false;
+    digestEnabled = false;
+    reminderLeadMinutes = 10;
+    notificationPreferencesLoading = true;
+    private notificationPreferencesReady: Promise<void> = Promise.resolve();
+
     currentPassword = '';
     newPassword = '';
     newPasswordConfirmation = '';
@@ -48,6 +54,7 @@ export class Account implements OnInit {
 
     ngOnInit() {
         this.sync();
+        this.notificationPreferencesReady = this.loadNotificationPreferences();
     }
 
     private sync() {
@@ -79,6 +86,35 @@ export class Account implements OnInit {
             await this.auth.updateProfile();
             this.sync();
             return result.message || 'Saved.';
+        });
+    }
+
+    async loadNotificationPreferences() {
+        this.notificationPreferencesLoading = true;
+        try {
+            const preferences = await this.auth.call('GET', 'notification-preferences');
+            if (!preferences) return;
+            this.remindersEnabled = preferences.reminders_enabled;
+            this.digestEnabled = preferences.digest_enabled;
+            this.reminderLeadMinutes = preferences.reminder_lead_minutes;
+            this.notificationPreferencesLoading = false;
+        } catch (e) {
+            this.error = errorText(e);
+        }
+    }
+
+    saveNotificationPreferences() {
+        return this.run(async () => {
+            await this.notificationPreferencesReady;
+            const preferences = await this.auth.call('PUT', 'notification-preferences', {
+                reminders_enabled: this.remindersEnabled,
+                digest_enabled: this.digestEnabled,
+                reminder_lead_minutes: this.reminderLeadMinutes
+            });
+            this.remindersEnabled = preferences.reminders_enabled;
+            this.digestEnabled = preferences.digest_enabled;
+            this.reminderLeadMinutes = preferences.reminder_lead_minutes;
+            return 'Notification preferences saved.';
         });
     }
 

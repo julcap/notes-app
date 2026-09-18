@@ -7,6 +7,7 @@ from sqlalchemy import engine_from_config, pool, text
 from app.database import Base
 from app.auth import models as auth_models  # noqa: F401
 from app.notes import models as notes_models  # noqa: F401
+from app.notifications import models as notification_models  # noqa: F401
 
 
 config = context.config
