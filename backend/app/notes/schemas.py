@@ -22,6 +22,7 @@ class AttachmentOut(BaseModel):
     id: str
     filename: str
     size: int
+    content_type: str
 
 
 class ActionItemInput(BaseModel):

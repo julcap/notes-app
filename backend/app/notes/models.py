@@ -44,6 +44,7 @@ class Attachment(Base):
     note_id: Mapped[str] = mapped_column(ForeignKey('notes.id', ondelete='CASCADE'), index=True)
     filename: Mapped[str] = mapped_column(String(255))
     size: Mapped[int]
+    content_type: Mapped[str] = mapped_column(String(255), default='application/octet-stream')
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 

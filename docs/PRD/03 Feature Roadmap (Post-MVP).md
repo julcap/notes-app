@@ -19,7 +19,7 @@ Roughly cheapest-and-most-impactful first, action items excepted since it's alre
 3. ✅ [Full-text search](./03%20Feature%20Roadmap/03%20-%20done%20-%20Full-text%20search.md) — weighted Postgres `tsvector`/GIN search shipped 2026-09-17; backend-only.
 4. ✅ [Pagination](./03%20Feature%20Roadmap/04%20-%20done%20-%20Pagination.md) — server totals, validated `skip`/`limit`, debounced backend search, and append-only **Load more** shipped 2026-09-17.
 5. ✅ [Soft delete & undo](./03%20Feature%20Roadmap/05%20-%20done%20-%20Soft%20delete%20and%20undo.md) — 15-second owner-only undo, hidden deleted parents, and a retry-safe 30-day purge job shipped 2026-09-17.
-6. ⬜ [Attachment previews](./03%20Feature%20Roadmap/06%20Attachment%20previews.md) — inline preview for images/PDFs.
+6. ✅ [Attachment previews](./03%20Feature%20Roadmap/06%20-%20done%20-%20Attachment%20previews.md) — authenticated, byte-signature-verified image/PDF previews shipped 2026-09-18; download remains available.
 7. ⬜ [Export](./03%20Feature%20Roadmap/07%20Export.md) — single meeting as PDF or markdown.
 8. ⬜ [Notifications & reminders](./03%20Feature%20Roadmap/08%20Notifications%20and%20reminders.md) — needs the email infra from the auth spec, and a scheduler this app doesn't have yet.
 9. ⬜ [Sharing & collaboration](./03%20Feature%20Roadmap/09%20Sharing%20and%20collaboration.md) — the biggest lift, reshapes authorization across every note endpoint, so it's last.

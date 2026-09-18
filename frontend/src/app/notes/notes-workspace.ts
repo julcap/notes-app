@@ -3,6 +3,7 @@ import {CommonModule} from '@angular/common';
 import {FormsModule} from '@angular/forms';
 import {HttpClient} from '@angular/common/http';
 import {CanDeactivateFn, RouterLink} from '@angular/router';
+import {DomSanitizer, SafeResourceUrl} from '@angular/platform-browser';
 import {firstValueFrom} from 'rxjs';
 
 import {AuthService} from '../auth/auth.service';
@@ -10,6 +11,12 @@ import {NavRail} from '../shell/nav-rail';
 import {ActionItem, Attachment, Note, NotePage} from './note.model';
 import {MarkdownEditor} from './markdown-editor';
 import {MarkdownRenderer} from './markdown-renderer';
+
+interface AttachmentPreview {
+    kind: 'image' | 'pdf';
+    url: string;
+    resourceUrl?: SafeResourceUrl;
+}
 
 @Component({
     selector: 'meeting-workspace',
@@ -19,7 +26,9 @@ import {MarkdownRenderer} from './markdown-renderer';
 })
 export class NotesWorkspace implements OnInit, OnDestroy {
     private http = inject(HttpClient);
+    private sanitizer = inject(DomSanitizer);
     private requestVersion = 0;
+    private previewVersion = 0;
     private searchTimer?: ReturnType<typeof setTimeout>;
     private undoTimer?: ReturnType<typeof setTimeout>;
     auth = inject(AuthService);
@@ -37,6 +46,7 @@ export class NotesWorkspace implements OnInit, OnDestroy {
     message = '';
     undoNote: Note | null = null;
     newActionItem = this.blankActionItem();
+    attachmentPreviews: Record<string, AttachmentPreview> = {};
 
     async logout() {
         if (this.dirty && !window.confirm('Discard unsaved changes and log out?')) return;
@@ -108,6 +118,7 @@ export class NotesWorkspace implements OnInit, OnDestroy {
     ngOnDestroy() {
         if (this.searchTimer) clearTimeout(this.searchTimer);
         if (this.undoTimer) clearTimeout(this.undoTimer);
+        this.clearAttachmentPreviews();
     }
 
     private invalidateListResponse() {
@@ -183,6 +194,7 @@ export class NotesWorkspace implements OnInit, OnDestroy {
         this.editing = false;
         this.message = '';
         this.newActionItem = this.blankActionItem();
+        void this.loadAttachmentPreviews(note);
     }
 
     select(n: Note) {
@@ -198,6 +210,7 @@ export class NotesWorkspace implements OnInit, OnDestroy {
         }
         if (this.busy || (this.dirty && !window.confirm('Discard unsaved changes?'))) return;
         this.invalidateListResponse();
+        this.clearAttachmentPreviews();
         this.selected = null;
         this.draft = this.blank();
         this.editing = true;
@@ -226,6 +239,7 @@ export class NotesWorkspace implements OnInit, OnDestroy {
         try {
             const n = await firstValueFrom(this.selected ? this.http.put<Note>('/api/notes/' + this.selected.id, this.draft) : this.http.post<Note>('/api/notes', this.draft));
             this.selected = n;
+            void this.loadAttachmentPreviews(n);
             this.editing = false;
             this.message = 'All changes saved';
         } catch {
@@ -256,7 +270,12 @@ export class NotesWorkspace implements OnInit, OnDestroy {
             const wasVisible = this.notes.some(note => note.id === noteId);
             this.notes = this.notes.filter(note => note.id !== noteId);
             if (wasVisible) this.total = Math.max(0, this.total - 1);
-            this.selected = this.notes[0] || null;
+            if (this.notes.length) {
+                this.applySelection(this.notes[0]);
+            } else {
+                this.clearAttachmentPreviews();
+                this.selected = null;
+            }
             this.message = 'Note deleted';
             this.showUndo(deletedNote, undoDeadline);
         }
@@ -293,6 +312,7 @@ export class NotesWorkspace implements OnInit, OnDestroy {
                 this.http.post<Note>(`/api/notes/${deletedNote.id}/undelete`, {})
             );
             this.selected = restored;
+            void this.loadAttachmentPreviews(restored);
             this.message = 'Meeting restored';
         } catch {
             operationError = 'The note could not be restored. The undo window may have expired.';
@@ -322,6 +342,7 @@ export class NotesWorkspace implements OnInit, OnDestroy {
         try {
             const item = await firstValueFrom(this.http.post<Attachment>(`/api/notes/${this.selected.id}/attachments`, body));
             this.selected.attachments.push(item);
+            void this.loadAttachmentPreviews(this.selected);
             this.message = 'Attachment uploaded';
         } catch {
             operationError = 'Upload failed. Please try again.';
@@ -340,6 +361,7 @@ export class NotesWorkspace implements OnInit, OnDestroy {
         try {
             await firstValueFrom(this.http.delete(`/api/notes/${this.selected.id}/attachments/${a.id}`));
             this.selected.attachments = this.selected.attachments.filter(x => x.id !== a.id);
+            void this.loadAttachmentPreviews(this.selected);
         } catch {
             operationError = 'Could not remove attachment.';
         } finally {
@@ -401,6 +423,56 @@ export class NotesWorkspace implements OnInit, OnDestroy {
             this.busy = false;
         }
         await this.restoreListAfterMutation(operationError);
+    }
+
+    attachmentPreview(attachment: Attachment) {
+        return this.attachmentPreviews[attachment.id];
+    }
+
+    private previewKind(contentType: string): 'image' | 'pdf' | null {
+        if (['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(contentType)) return 'image';
+        return contentType === 'application/pdf' ? 'pdf' : null;
+    }
+
+    private async loadAttachmentPreviews(note: Note) {
+        this.clearAttachmentPreviews();
+        const version = this.previewVersion;
+        await Promise.all(note.attachments.map(async attachment => {
+            const kind = this.previewKind(attachment.content_type);
+            if (!kind) return;
+            try {
+                const blob = await firstValueFrom(this.http.get(
+                    `/api/notes/${note.id}/attachments/${attachment.id}`,
+                    {params: {inline: 'true'}, responseType: 'blob'}
+                ));
+                if (
+                    version !== this.previewVersion
+                    || this.selected?.id !== note.id
+                    || blob.type.toLowerCase() !== attachment.content_type
+                ) return;
+                const url = URL.createObjectURL(blob);
+                this.attachmentPreviews = {
+                    ...this.attachmentPreviews,
+                    [attachment.id]: {
+                        kind,
+                        url,
+                        resourceUrl: kind === 'pdf'
+                            ? this.sanitizer.bypassSecurityTrustResourceUrl(url)
+                            : undefined
+                    }
+                };
+            } catch {
+                // A failed or download-only response keeps the normal download action available.
+            }
+        }));
+    }
+
+    private clearAttachmentPreviews() {
+        this.previewVersion++;
+        for (const preview of Object.values(this.attachmentPreviews)) {
+            URL.revokeObjectURL(preview.url);
+        }
+        this.attachmentPreviews = {};
     }
 }
 

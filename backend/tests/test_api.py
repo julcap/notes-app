@@ -11,6 +11,17 @@ import pytest
 
 from conftest import signed_in
 
+
+PNG_BYTES = (
+    b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01'
+    b'\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDAT\x08\xd7c\xf8\xcf\xc0\xf0\x1f\x00\x05\x00\x01\xff\x89\x99\r\x1d'
+    b'\x00\x00\x00\x00IEND\xaeB`\x82'
+)
+JPEG_BYTES = b'\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00\xff\xd9'
+GIF_BYTES = b'GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff!\xf9\x04\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;'
+WEBP_BYTES = b'RIFF\x18\x00\x00\x00WEBPVP8 \n\x00\x00\x00\x2f\x00\x00\x00\x00\x07\x10\xfd\x8f\xfe\x07\x00'
+PDF_BYTES = b'%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n'
+
 def note(client, title='Planning', content='Decide the launch date', attendees='Alex', meeting_date='2026-09-17'):
     response = client.post('/api/notes', json={'title':title,'content':content,'attendees':attendees,'meeting_date':meeting_date})
     assert response.status_code == 201
@@ -191,6 +202,79 @@ def test_attachment_roundtrip_and_cascade(client):
     assert client.post(base + '/undelete').status_code == 200
     assert client.delete(base + '/attachments/' + a['id']).status_code == 204
     assert not (STORAGE / a['id']).exists()
+
+
+def test_attachment_inline_preview_requires_matching_safe_signature_and_owner(raw):
+    owner = signed_in(raw)
+    n = note(raw)
+    base = f"/api/notes/{n['id']}/attachments"
+    fixtures = [
+        ('pixel.png', PNG_BYTES, 'image/png'),
+        ('photo.jpg', JPEG_BYTES, 'image/jpeg'),
+        ('animation.gif', GIF_BYTES, 'image/gif'),
+        ('sample.webp', WEBP_BYTES, 'image/webp'),
+        ('document.pdf', PDF_BYTES, 'application/pdf'),
+    ]
+
+    uploaded = []
+    for filename, content, content_type in fixtures:
+        response = raw.post(base, files={'file': (filename, content, content_type)})
+        assert response.status_code == 201
+        item = response.json()
+        assert item['content_type'] == content_type
+        uploaded.append((item, content, content_type))
+
+    first, first_content, _ = uploaded[0]
+    download = raw.get(f"{base}/{first['id']}")
+    assert download.content == first_content
+    assert download.headers['content-type'] == 'application/octet-stream'
+    assert download.headers['content-disposition'].startswith('attachment;')
+    assert download.headers['x-content-type-options'] == 'nosniff'
+    assert download.headers['cache-control'] == 'no-store'
+
+    for item, content, content_type in uploaded:
+        preview = raw.get(f"{base}/{item['id']}", params={'inline': 'true'})
+        assert preview.content == content
+        assert preview.headers['content-type'] == content_type
+        assert preview.headers['content-disposition'].startswith('inline;')
+        assert preview.headers['x-content-type-options'] == 'nosniff'
+        assert preview.headers['cache-control'] == 'no-store'
+
+    extension_fallback = raw.post(
+        base,
+        files={'file': ('fallback.png', PNG_BYTES, 'application/octet-stream')},
+    ).json()
+    assert extension_fallback['content_type'] == 'image/png'
+    assert raw.get(f"{base}/{extension_fallback['id']}", params={'inline': 'true'}).headers['content-type'] == 'image/png'
+
+    unsafe = [
+        ('spoofed.png', b'<!doctype html><script>alert(1)</script>', 'image/png'),
+        ('vector.svg', b'<svg xmlns="http://www.w3.org/2000/svg"><script/></svg>', 'image/svg+xml'),
+        ('wrong-mime.jpg', PNG_BYTES, 'image/jpeg'),
+        ('broken.pdf', b'not a pdf', 'application/pdf'),
+    ]
+    for filename, content, content_type in unsafe:
+        item = raw.post(base, files={'file': (filename, content, content_type)}).json()
+        preview = raw.get(f"{base}/{item['id']}", params={'inline': 'true'})
+        assert preview.content == content
+        assert preview.headers['content-type'] == 'application/octet-stream'
+        assert preview.headers['content-disposition'].startswith('attachment;')
+
+    other = note(raw, title='Other note')
+    assert raw.get(
+        f"/api/notes/{other['id']}/attachments/{first['id']}",
+        params={'inline': 'true'},
+    ).status_code == 404
+
+    raw.headers.pop('Authorization')
+    assert raw.get(f"{base}/{first['id']}", params={'inline': 'true'}).status_code == 401
+    raw.headers['Authorization'] = 'Bearer ' + owner['access_token']
+    signed_in(raw, 'other@example.com')
+    assert raw.get(f"{base}/{first['id']}", params={'inline': 'true'}).status_code == 404
+
+    raw.headers['Authorization'] = 'Bearer ' + owner['access_token']
+    assert raw.delete(f"/api/notes/{n['id']}").status_code == 204
+    assert raw.get(f"{base}/{first['id']}", params={'inline': 'true'}).status_code == 404
 
 def test_size_limit_and_removal(client):
     n=note(client)

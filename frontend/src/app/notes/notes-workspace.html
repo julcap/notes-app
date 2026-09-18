@@ -105,12 +105,22 @@
                                                                                                         [disabled]="busy"
                                                                                                         aria-label="Upload attachment"></label>
                             </div>
-                            <div *ngFor="let a of n.attachments" class="file-row"><span class="file-icon">↗</span>
-                                <button class="file-download" (click)="downloadFile(a)">{{ a.filename }}
-                                    <small>{{ a.size / 1024 | number:'1.0-1' }} KB</small></button>
-                                <button (click)="removeFile(a)" [disabled]="busy"
-                                        [attr.aria-label]="'Remove '+a.filename">×
-                                </button>
+                            <div *ngFor="let a of n.attachments" class="attachment-card">
+                                <ng-container *ngIf="attachmentPreview(a) as preview">
+                                    <img *ngIf="preview.kind === 'image'" class="attachment-preview-image"
+                                         [src]="preview.url" [alt]="'Preview of ' + a.filename">
+                                    <iframe *ngIf="preview.kind === 'pdf'" class="attachment-preview-pdf"
+                                            [src]="preview.resourceUrl" sandbox
+                                            [title]="'Preview of ' + a.filename"></iframe>
+                                </ng-container>
+                                <div class="file-row"><span class="file-icon">↗</span>
+                                    <button class="file-download" (click)="downloadFile(a)"
+                                            [attr.aria-label]="'Download '+a.filename">{{ a.filename }}
+                                        <small>{{ a.size / 1024 | number:'1.0-1' }} KB</small></button>
+                                    <button (click)="removeFile(a)" [disabled]="busy"
+                                            [attr.aria-label]="'Remove '+a.filename">×
+                                    </button>
+                                </div>
                             </div>
                             <div *ngIf="!n.attachments.length" class="file-empty">Keep the full picture. Add documents,
                                 slides, or images.<small>Up to 20 MB per file</small></div>

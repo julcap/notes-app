@@ -15,7 +15,7 @@ docker compose up --build -d
 
 Open http://localhost:8080 and create an account. Open the local development inbox at http://localhost:8025 to find the verification email, follow its link, and click **Verify email**. You can then create a note. Production mail uses AWS SES. See [AUTH.md](AUTH.md) for configuration and security details. Notes and uploads survive container restarts in named Docker volumes. `docker compose down` stops the app without deleting data; adding `-v` permanently removes local data.
 
-The app starts empty intentionally. Search filters title, body, and attendees. The API also supports `GET /api/notes?q=keyword`. Deleting a note starts a 15-second undo window; hidden notes and attachment bytes are retained for 30 days before the scheduled purge. Attachments have a 20 MB limit and are served as downloads rather than inline executable content. Filenames are metadata; server-generated UUIDs determine disk paths.
+The app starts empty intentionally. Search filters title, body, and attendees. The API also supports `GET /api/notes?q=keyword`. Deleting a note starts a 15-second undo window; hidden notes and attachment bytes are retained for 30 days before the scheduled purge. Attachments have a 20 MB limit. Downloads remain forced by default; authenticated inline previews are limited to PNG, JPEG, GIF, WebP, and PDF files whose stored media type matches a verified byte signature. Filenames are metadata; server-generated UUIDs determine disk paths.
 
 ## Development
 
@@ -74,7 +74,7 @@ Browser → Angular served by Nginx → `/api` reverse proxy → FastAPI → Pos
 - `backend/app/database.py`: SQLAlchemy engine, session factory, declarative base.
 - `backend/app/storage.py`: shared attachment-storage constants plus same-filesystem quarantine/restore helpers used by purge and account deletion.
 - `backend/app/auth/`: accounts, sessions and email — `models.py`/`schemas.py` (data), `security.py` (hashing, rate limiting, origin checks), `tokens.py` (JWTs, cookies, dependencies, MFA challenges), `email.py` (SES/SMTP delivery), `totp.py` (TOTP secrets, QR codes, backup codes), `routes.py` (register/login/reset/verify/account management/2FA), `oauth.py` (Google/Facebook/Amazon).
-- `backend/app/notes/`: meeting notes and attachments — `models.py`/`schemas.py` (data), `routes.py` (CRUD, 15-second undo, and file upload/download).
+- `backend/app/notes/`: meeting notes and attachments — `models.py`/`schemas.py` (data), `attachments.py` (media-type normalization and byte-signature verification), `routes.py` (CRUD, 15-second undo, and file upload/download/preview).
 - `backend/app/jobs.py`: internal scheduled-job CLI; `python -m app.jobs purge-deleted` performs PostgreSQL-locked, retry-safe permanent cleanup after 30 days.
 - `backend/app/migrations.py` and `backend/migrations/`: the Alembic upgrade entrypoint and immutable schema revisions. Every schema change must add a revision; `app.init_db` only runs `upgrade head`.
 - `compose.yaml`: local application stack; only the frontend is published, on localhost.

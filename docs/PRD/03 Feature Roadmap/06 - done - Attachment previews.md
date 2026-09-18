@@ -2,7 +2,15 @@
 
 2026-09-17 · split from `03 Feature Roadmap (Post-MVP).md`
 
-**Status:** Not started.
+**Status:** Code complete (2026-09-18); migration/deployment pending operator-controlled release.
+
+## Shipped behavior
+
+- Alembic revision `20260917_0004` stores an attachment media type, with `application/octet-stream` retained for legacy rows.
+- Uploads normalize the client media type and use a filename fallback only when the upload is generic; neither value alone authorizes an inline response.
+- `GET /api/notes/{note_id}/attachments/{attachment_id}?inline=true` returns inline content only when PNG, JPEG, GIF, WebP, or PDF byte signatures match the stored allowlisted media type. Spoofed, malformed, SVG, HTML, and unknown files remain forced downloads.
+- Every attachment response uses `X-Content-Type-Options: nosniff` and `Cache-Control: no-store`; the endpoint retains owner and active-parent checks.
+- The Angular detail view fetches previews through the authenticated API client, renders local object URLs only, sandboxes PDF frames, keeps download controls, and revokes preview URLs on replacement and destruction.
 
 ## Problem
 

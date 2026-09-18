@@ -586,6 +586,34 @@ h4 span {
     border-radius: 6px
 }
 
+.attachment-card {
+    margin: 10px 0
+}
+
+.attachment-card .file-row {
+    margin: 0
+}
+
+.attachment-preview-image, .attachment-preview-pdf {
+    display: block;
+    width: 100%;
+    max-height: 440px;
+    border: 1px solid #e6ece1;
+    border-bottom: 0;
+    border-radius: 6px 6px 0 0;
+    background: #f7f9f5;
+    object-fit: contain
+}
+
+.attachment-preview-pdf {
+    height: 440px
+}
+
+.attachment-preview-image + .file-row,
+.attachment-preview-pdf + .file-row {
+    border-radius: 0 0 6px 6px
+}
+
 .file-row a {
     font-size: 11px;
     text-decoration: none;

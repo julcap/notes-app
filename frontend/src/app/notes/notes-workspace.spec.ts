@@ -37,6 +37,15 @@ const secondNote: Note = {
     title: 'Retrospective'
 };
 
+const previewNote: Note = {
+    ...note,
+    attachments: [
+        {id: 'image-1', filename: 'diagram.png', size: 128, content_type: 'image/png'},
+        {id: 'pdf-1', filename: 'agenda.pdf', size: 256, content_type: 'application/pdf'},
+        {id: 'text-1', filename: 'notes.txt', size: 32, content_type: 'text/plain'}
+    ]
+};
+
 describe('NotesWorkspace', () => {
     let fixture: ComponentFixture<NotesWorkspace>;
     let component: NotesWorkspace;
@@ -296,6 +305,74 @@ describe('NotesWorkspace', () => {
 
         const textarea = fixture.nativeElement.querySelector('markdown-editor textarea') as HTMLTextAreaElement;
         expect(textarea.getAttribute('aria-labelledby')).toBe('content-label');
+    });
+
+    it('renders authenticated image and sandboxed PDF previews while preserving downloads', async () => {
+        const createObjectUrl = spyOn(URL, 'createObjectURL').and.callFake(blob => `blob:${(blob as Blob).type}`);
+        const click = spyOn(HTMLAnchorElement.prototype, 'click');
+        fixture.detectChanges();
+        http.expectOne(request => request.url === '/api/notes').flush({items: [previewNote], total: 1});
+        await Promise.resolve();
+
+        const image = http.expectOne(request =>
+            request.url === '/api/notes/note-1/attachments/image-1' && request.params.get('inline') === 'true'
+        );
+        const pdf = http.expectOne(request =>
+            request.url === '/api/notes/note-1/attachments/pdf-1' && request.params.get('inline') === 'true'
+        );
+        http.expectNone(request => request.url.includes('/attachments/text-1'));
+        image.flush(new Blob(['image'], {type: 'image/png'}), {headers: {'Content-Type': 'image/png'}});
+        pdf.flush(new Blob(['pdf'], {type: 'application/pdf'}), {headers: {'Content-Type': 'application/pdf'}});
+        await fixture.whenStable();
+        fixture.detectChanges();
+
+        const imagePreview = fixture.nativeElement.querySelector('.attachment-preview-image') as HTMLImageElement;
+        const pdfPreview = fixture.nativeElement.querySelector('.attachment-preview-pdf') as HTMLIFrameElement;
+        expect(imagePreview.src).toContain('blob:image/png');
+        expect(pdfPreview.src).toContain('blob:application/pdf');
+        expect(pdfPreview.getAttribute('sandbox')).toBe('');
+        expect(fixture.nativeElement.querySelectorAll('[aria-label^="Download "]').length).toBe(3);
+        expect(createObjectUrl).toHaveBeenCalledTimes(2);
+
+        (fixture.nativeElement.querySelector('[aria-label="Download diagram.png"]') as HTMLButtonElement).click();
+        const download = http.expectOne(request =>
+            request.url === '/api/notes/note-1/attachments/image-1' && !request.params.has('inline')
+        );
+        download.flush(new Blob(['image'], {type: 'application/octet-stream'}));
+        await fixture.whenStable();
+        expect(click).toHaveBeenCalled();
+    });
+
+    it('rejects download-only preview responses and revokes preview URLs on selection and destroy', async () => {
+        const createObjectUrl = spyOn(URL, 'createObjectURL').and.callFake(blob => `blob:${(blob as Blob).type}`);
+        const revokeObjectUrl = spyOn(URL, 'revokeObjectURL');
+        fixture.detectChanges();
+        http.expectOne(request => request.url === '/api/notes').flush({items: [previewNote, secondNote], total: 2});
+        await Promise.resolve();
+        http.expectOne(request => request.url.endsWith('/attachments/image-1'))
+            .flush(new Blob(['image'], {type: 'image/png'}));
+        http.expectOne(request => request.url.endsWith('/attachments/pdf-1'))
+            .flush(new Blob(['pdf'], {type: 'application/octet-stream'}));
+        await fixture.whenStable();
+        fixture.detectChanges();
+
+        expect(createObjectUrl).toHaveBeenCalledTimes(1);
+        expect(fixture.nativeElement.querySelector('.attachment-preview-image')).not.toBeNull();
+        expect(fixture.nativeElement.querySelector('.attachment-preview-pdf')).toBeNull();
+
+        component.select(secondNote);
+        expect(revokeObjectUrl).toHaveBeenCalledOnceWith('blob:image/png');
+
+        component.select(previewNote);
+        http.expectOne(request => request.url.endsWith('/attachments/image-1'))
+            .flush(new Blob(['image'], {type: 'image/png'}));
+        http.expectOne(request => request.url.endsWith('/attachments/pdf-1'))
+            .flush(new Blob(['pdf'], {type: 'application/pdf'}));
+        await fixture.whenStable();
+        fixture.destroy();
+
+        expect(revokeObjectUrl).toHaveBeenCalledWith('blob:image/png');
+        expect(revokeObjectUrl).toHaveBeenCalledWith('blob:application/pdf');
     });
 
     it('updates a valid meeting note and preserves the draft after an HTTP error', async () => {

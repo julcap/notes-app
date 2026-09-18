@@ -12,6 +12,7 @@ from ..auth import User, current_user, verified_user
 from ..database import db, now
 from ..jobs import try_reconcile_quarantine
 from ..storage import FILE_CLEANUP_LOCK_ID, MAX_FILE_SIZE, STORAGE, discard_quarantined, quarantine_files
+from .attachments import BINARY_CONTENT_TYPE, stored_content_type, verified_inline_content_type
 from .models import ActionItem, Attachment, Note
 from .schemas import ActionItemInput, ActionItemOut, ActionItemPatch, AttachmentOut, NoteInput, NoteOut, NotePage
 
@@ -139,7 +140,13 @@ def upload(note_id: str, file: UploadFile, session: Session = Depends(db), user:
                     raise HTTPException(413, 'Files must be 20 MB or smaller')
                 target.write(chunk)
         filename = Path((file.filename or 'attachment').replace('\\', '/')).name[:255] or 'attachment'
-        attachment = Attachment(id=attachment_id, note_id=note.id, filename=filename, size=size)
+        attachment = Attachment(
+            id=attachment_id,
+            note_id=note.id,
+            filename=filename,
+            size=size,
+            content_type=stored_content_type(filename, file.content_type),
+        )
         session.add(attachment)
         note.updated_at = now()
         session.commit()
@@ -155,12 +162,30 @@ def upload(note_id: str, file: UploadFile, session: Session = Depends(db), user:
 
 
 @router.get('/{note_id}/attachments/{attachment_id}')
-def download(note_id: str, attachment_id: str, session: Session = Depends(db), user: User = Depends(current_user)):
+def download(
+    note_id: str,
+    attachment_id: str,
+    inline: bool = False,
+    session: Session = Depends(db),
+    user: User = Depends(current_user),
+):
     get_note(session, note_id, user)
     item = session.get(Attachment, attachment_id)
-    if item is None or item.note_id != note_id or not (STORAGE / item.id).is_file():
+    path = STORAGE / item.id if item is not None else None
+    if item is None or item.note_id != note_id or path is None or not path.is_file():
         raise HTTPException(404, 'Attachment not found')
-    return FileResponse(STORAGE / item.id, filename=item.filename, media_type='application/octet-stream', headers={'X-Content-Type-Options': 'nosniff'})
+    verified_type = verified_inline_content_type(path) if inline else None
+    is_safe_inline = verified_type is not None and verified_type == item.content_type
+    return FileResponse(
+        path,
+        filename=item.filename,
+        media_type=verified_type if is_safe_inline else BINARY_CONTENT_TYPE,
+        content_disposition_type='inline' if is_safe_inline else 'attachment',
+        headers={
+            'X-Content-Type-Options': 'nosniff',
+            'Cache-Control': 'no-store',
+        },
+    )
 
 
 @router.delete('/{note_id}/attachments/{attachment_id}', status_code=204)

@@ -2,6 +2,7 @@ export interface Attachment {
     id: string;
     filename: string;
     size: number;
+    content_type: string;
 }
 
 export interface ActionItem {
