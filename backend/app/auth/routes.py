@@ -9,6 +9,7 @@ from ..database import db, now
 from ..jobs import try_reconcile_quarantine
 from ..notes.models import MeetingShare, Note
 from ..notes.permissions import lock_account
+from ..observability import log_auth_event
 from ..storage import FILE_CLEANUP_LOCK_ID, storage
 from . import totp
 from .config import APP_URL, SECURE
@@ -57,21 +58,32 @@ def login(data: Login, request: Request, response: Response, session: Session = 
     if not user:
         social = session.scalar(select(User).where(User.email == data.email))
         if social:
+            log_auth_event('login', 'failure', 'password')
             raise HTTPException(400, f'Use {social.auth_provider.title()} to sign in to this account.')
     if not user or not valid or len(data.password.encode()) > 72:
+        log_auth_event('login', 'failure', 'password')
         raise HTTPException(401, 'Email or password is incorrect.')
     if user.totp_enabled:
         return {'mfa_required': True, 'mfa_token': mfa_challenge(user, data.remember)}
-    return issue(user, response, session, data.remember)
+    result = issue(user, response, session, data.remember)
+    log_auth_event('login', 'success', 'password')
+    return result
 
 
 @router.post('/login/2fa', dependencies=[Depends(same_origin)])
 def login_2fa(data: Login2FA, request: Request, response: Response, session: Session = Depends(db)):
     limit(request, 'login-2fa', 15)
-    user, remember = consume_mfa(data.mfa_token, session)
+    try:
+        user, remember = consume_mfa(data.mfa_token, session)
+    except HTTPException:
+        log_auth_event('login', 'failure', 'two_factor')
+        raise
     if not verify_totp_or_backup_code(session, user, data.code):
+        log_auth_event('login', 'failure', 'two_factor')
         raise HTTPException(401, 'Invalid code.')
-    return issue(user, response, session, remember)
+    result = issue(user, response, session, remember)
+    log_auth_event('login', 'success', 'two_factor')
+    return result
 
 
 @router.post('/refresh', dependencies=[Depends(same_origin)])
@@ -136,6 +148,7 @@ def forgot(data: EmailInput, request: Request, tasks: BackgroundTasks, session: 
     elif users:
         providers = ', '.join(sorted({u.auth_provider.title() for u in users}))
         tasks.add_task(deliver_email, data.email, 'Sign in to Minutes', f'Your account uses {providers}. Use that provider at {APP_URL}/login to sign in.')
+    log_auth_event('password_reset_requested', 'accepted')
     return {'message': "If that email exists, we've sent a link or sign-in instructions."}
 
 
@@ -281,6 +294,7 @@ def confirm_2fa(data: TotpCode, request: Request, user: User = Depends(current_u
     if not secret:
         raise HTTPException(400, 'Start enrollment before confirming a code.')
     if not totp.verify_code(secret, data.code):
+        log_auth_event('2fa_enabled', 'failure')
         raise HTTPException(401, 'Invalid code.')
     user.totp_enabled = True
     session.execute(delete(BackupCode).where(BackupCode.user_id == user.id))
@@ -288,6 +302,7 @@ def confirm_2fa(data: TotpCode, request: Request, user: User = Depends(current_u
     for code in codes:
         session.add(BackupCode(user_id=user.id, code_hash=password_hash(code)))
     session.commit()
+    log_auth_event('2fa_enabled', 'success')
     return {'message': 'Two-factor authentication is enabled.', 'backup_codes': codes}
 
 
@@ -298,9 +313,11 @@ def disable_2fa(data: TotpDisable, request: Request, user: User = Depends(curren
         raise HTTPException(400, 'Two-factor authentication is not enabled.')
     confirmed = (user.password_hash and check_password(data.password, user.password_hash)) or verify_totp_or_backup_code(session, user, data.code)
     if not confirmed:
+        log_auth_event('2fa_disabled', 'failure')
         raise HTTPException(401, 'Enter your current password or a valid code to disable two-factor authentication.')
     user.totp_enabled = False
     user.totp_secret = None
     session.execute(delete(BackupCode).where(BackupCode.user_id == user.id))
     session.commit()
+    log_auth_event('2fa_disabled', 'success')
     return {'message': 'Two-factor authentication is disabled.'}

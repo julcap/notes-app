@@ -7,6 +7,7 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from ..database import db
+from ..observability import log_auth_event
 from .config import APP_URL
 from .email import email_link
 from .models import Identity, User
@@ -82,7 +83,9 @@ async def social_callback(provider: str, request: Request, tasks: BackgroundTask
             return RedirectResponse(APP_URL + f'/login-2fa#token={mfa_challenge(user, remember)}', status_code=303)
         response = RedirectResponse(APP_URL + '/auth/callback', status_code=303)
         issue(user, response, session, remember)
+        log_auth_event('login', 'success', 'oauth')
         return response
     except Exception:
         session.rollback()
+        log_auth_event('login', 'failure', 'oauth')
         return RedirectResponse(APP_URL + '/login?error=social_failed', status_code=303)

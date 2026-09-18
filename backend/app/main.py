@@ -1,6 +1,6 @@
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
@@ -10,6 +10,7 @@ from .auth import router as auth_router
 from .database import Base, db, engine
 from .notes.routes import action_items_router
 from .notes.routes import router as notes_router
+from .observability import ObservedFastAPI
 from .storage import STORAGE, LocalStorage, storage
 from .notes.sharing import notes_sharing_router, sharing_router
 
@@ -20,7 +21,7 @@ async def lifespan(app):
         storage.root.mkdir(parents=True, exist_ok=True)
     yield
 
-app = FastAPI(title='Minutes API', lifespan=lifespan)
+app = ObservedFastAPI(title='Minutes API', lifespan=lifespan)
 
 app.add_middleware(SessionMiddleware, secret_key=SECRET, https_only=SECURE, same_site='lax', max_age=600)
 app.include_router(auth_router)

@@ -71,6 +71,7 @@ Browser → Angular served by Nginx → `/api` reverse proxy → FastAPI → Pos
 - `frontend/src/app/notes/`: `notes-workspace.ts`/`.html` (the meeting-notes UI) and `note.model.ts`.
 - `frontend/src/styles.css`: shared responsive styling.
 - `backend/app/main.py`: FastAPI app wiring (middleware, routers, health check).
+- `backend/app/observability.py`: allowlisted JSON logging, request-ID context/middleware, safe unhandled-error stacks, and identifier-free auth audit events.
 - `backend/app/database.py`: SQLAlchemy engine, session factory, declarative base.
 - `backend/app/storage.py`: local and S3-compatible attachment backends, deterministic object keys, and retryable quarantine/restore helpers used by routes, purge, and account deletion.
 - `backend/app/storage_migrate.py`: dry-run-by-default, SHA-256-verified local-to-S3 attachment migration CLI with a JSON-lines retry manifest.
