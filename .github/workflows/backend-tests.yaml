@@ -1,0 +1,30 @@
+name: Backend tests
+on:
+  workflow_call:
+  pull_request:
+  push:
+    branches: [main, feat/prd-completion]
+permissions:
+  contents: read
+concurrency:
+  group: minutes-backend-tests-${{ github.workflow }}-${{ github.ref }}-${{ github.sha }}
+  cancel-in-progress: false
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: azure/setup-kubectl@776406bce94f63e41d621b960d78ee25c8b76ede # v4
+      - name: Validate deployment policy and rendered manifests
+        run: |
+          python -m pip install PyYAML==6.0.2
+          python -m unittest tests/test_deployment_policy.py -v
+      - name: Validate monitoring alerts
+        run: |
+          docker run --rm --entrypoint /bin/promtool -v "$PWD/monitoring:/monitoring:ro" prom/prometheus:v3.14.0 check rules /monitoring/alerts.yml
+          docker run --rm --entrypoint /bin/promtool -v "$PWD/monitoring:/monitoring:ro" prom/prometheus:v3.14.0 test rules /monitoring/alerts.test.yml
+          docker run --rm -v "$PWD/monitoring:/monitoring:ro" prom/blackbox-exporter:v0.28.0 --config.file=/monitoring/blackbox.yml --config.check
+          docker run --rm --entrypoint /bin/amtool -v "$PWD/monitoring:/monitoring:ro" prom/alertmanager:v0.34.1 check-config /monitoring/alertmanager.yml
+      - run: docker compose -f compose.test.yaml up --build --abort-on-container-exit --exit-code-from tests
+      - if: always()
+        run: docker compose -f compose.test.yaml down -v

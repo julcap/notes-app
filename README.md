@@ -1,6 +1,6 @@
 # Minutes — Meeting Notes
 
-[![CI](https://github.com/julcap/notes-app/actions/workflows/ci.yml/badge.svg)](https://github.com/julcap/notes-app/actions/workflows/ci.yml)
+[![Backend tests](https://github.com/julcap/notes-app/actions/workflows/backend-tests.yaml/badge.svg?branch=main)](https://github.com/julcap/notes-app/actions/workflows/backend-tests.yaml) [![Frontend tests](https://github.com/julcap/notes-app/actions/workflows/frontend-tests.yaml/badge.svg?branch=main)](https://github.com/julcap/notes-app/actions/workflows/frontend-tests.yaml) [![Build & deploy](https://github.com/julcap/notes-app/actions/workflows/ci.yaml/badge.svg?branch=main)](https://github.com/julcap/notes-app/actions/workflows/ci.yaml)
 
 A standalone meeting notes workspace built from `Meeting Notes App.md`: Angular frontend, Python/FastAPI backend, and PostgreSQL. Create, edit, search, and safely undo deleted notes; record meeting dates and attendees; upload, download, and remove attachments.
 
@@ -166,7 +166,7 @@ Infrastructure prerequisites remain an EKS cluster with the AWS Load Balancer Co
 
 ## GitHub Actions
 
-The test job runs on pull requests and pushes to `main` or `feat/prd-completion`. It validates deployment policy and both rendered environments, validates monitoring configuration, runs Angular tests/build, and runs the PostgreSQL-backed backend suite. The feature branch also performs non-pushing Docker builds of both images. Main deploys only to staging when explicitly enabled. Production is an explicit promotion of a previously successful staging SHA and is subject to the `production` GitHub Environment approval rules.
+Backend and frontend tests run as separate workflows (`backend-tests.yaml`, `frontend-tests.yaml`) on pull requests and pushes to `main` or `feat/prd-completion`, each with its own status badge above. Backend validates deployment policy and both rendered environments, validates monitoring configuration, and runs the PostgreSQL-backed backend suite; frontend runs Angular tests and the production build. `ci.yaml` calls both as required checks before building images or deploying, so `needs: [test-backend, test-frontend]` gates the pipeline exactly as a single combined job used to. The feature branch also performs non-pushing Docker builds of both images. Main deploys only to staging when explicitly enabled. Production is an explicit promotion of a previously successful staging SHA and is subject to the `production` GitHub Environment approval rules.
 
 Local manifests still default to one backend replica and a ReadWriteOnce volume; S3 mode uses `deploy-s3`, removes the volume coupling, and enables two rolling backend replicas. The scheduled jobs retain PostgreSQL advisory locks and persistent delivery keys. SES has no exactly-once idempotency key, so a process crash after send acceptance but before the delivery-row commit can cause one duplicate retry.
 

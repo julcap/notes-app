@@ -11,7 +11,7 @@
 
 ## What exists
 
-- `test` validates rendered deployment policy and monitoring configuration, runs Angular tests/build, and runs the full PostgreSQL-backed backend/auth suite via `docker compose -f compose.test.yaml`.
+- `test-backend` and `test-frontend` (split 2026-09-18 from a single combined `test` job, each now its own reusable workflow file — `backend-tests.yaml`/`frontend-tests.yaml` — callable via `workflow_call` and independently triggered/badge-able) validate rendered deployment policy and monitoring configuration plus the full PostgreSQL-backed backend/auth suite, and run Angular tests/build, respectively. `build-images`/`deploy-staging` require `needs: [test-backend, test-frontend]`, preserving the original all-must-pass gate.
 - `build-images` verifies both Dockerfiles with `push: false` on pull requests and feature-branch pushes.
 - `deploy-staging` authenticates through the staging GitHub Environment and OIDC, requires immutable ECR repositories, builds SHA-tagged images, deploys their digest references, waits for a separate Alembic Job, then rolls out only `minutes-staging`.
 - Production `workflow_dispatch` is accepted only from `main` and validates that the exact requested SHA has a successful main-branch staging deployment. It downloads the exact digest references recorded by that staging run, does not rebuild or re-resolve tags, and enters the reviewer/branch-policy-gated production GitHub Environment before deploying only `minutes-production`.
