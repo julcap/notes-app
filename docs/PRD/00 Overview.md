@@ -14,15 +14,15 @@ Every in-scope item shipped: registration & email verification, login & sessions
 
 → `02 Auth and Registration/`
 
-## 3. [Feature Roadmap (Post-MVP)](./03%20Feature%20Roadmap%20(Post-MVP).md) — 8/9 code-complete
+## 3. [Feature Roadmap (Post-MVP)](./03%20Feature%20Roadmap%20(Post-MVP).md) — 9/9 code-complete
 
-Product depth: what's missing for this to feel like a product, not a demo. Action items, rich text formatting, search, pagination, soft delete, attachment previews, export, and notifications are code-complete; sharing/collaboration remains.
+Product depth: action items, rich text formatting, search, pagination, soft delete, attachment previews, export, notifications, and owner-managed sharing/collaboration are code-complete.
 
 → `03 Feature Roadmap/`
 
-## 4. [Production Readiness Gaps](./04%20Production%20Readiness%20Gaps.md) — 14/15 code-complete
+## 4. [Production Readiness Gaps](./04%20Production%20Readiness%20Gaps.md) — 15/15 code-complete
 
-CI/CD, secrets management, health checks, backend/frontend tests, database migrations, S3-compatible attachment storage, structured logging, opt-in backend/frontend error tracking, bounded private Prometheus request metrics, tested alert templates, isolated staging with explicit production promotion, PostgreSQL-backed app-wide rate limits, and active-session management are code-complete. The legal pages required for social login to leave test mode remain. Live staging/production resources and approval rules, S3 cutover, production log aggregation, live scrubbed Sentry ingestion, a live internal metrics scraper, and confirmed human alert delivery are separate operator gates; code completion does not imply those provider or production activation gates have been cleared.
+CI/CD, secrets management, health checks, backend/frontend tests, database migrations, S3-compatible attachment storage, structured logging, opt-in backend/frontend error tracking, bounded private Prometheus request metrics, tested alert templates, isolated staging with explicit production promotion, PostgreSQL-backed app-wide rate limits, active-session management, and public legal-page drafts are code-complete. Live staging/production resources and approval rules, S3 cutover, production log aggregation, live scrubbed Sentry ingestion, a live internal metrics scraper, confirmed human alert delivery, approved operator/contact details, legal review, public publication, and OAuth provider approval are separate operator gates; code completion does not imply those gates have been cleared.
 
 → `04 Production Readiness/`
 

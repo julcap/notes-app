@@ -54,6 +54,13 @@ describe('AuthPage', () => {
         expect(submitButton().disabled).toBeFalse();
     });
 
+    it('links registration to the public privacy policy and terms', () => {
+        const links = Array.from(fixture.nativeElement.querySelectorAll('a')) as HTMLAnchorElement[];
+
+        expect(links.some(link => link.getAttribute('href') === '/privacy')).toBeTrue();
+        expect(links.some(link => link.getAttribute('href') === '/terms')).toBeTrue();
+    });
+
     it('keeps the login form disabled until both credentials are present', async () => {
         component.mode = 'login';
         fixture.detectChanges();

@@ -73,6 +73,13 @@ describe('Account', () => {
         expect(navigate).toHaveBeenCalledOnceWith('/login');
     });
 
+    it('links account settings to the public privacy policy and terms', () => {
+        const links = Array.from(fixture.nativeElement.querySelectorAll('a')) as HTMLAnchorElement[];
+
+        expect(links.some(link => link.getAttribute('href') === '/privacy')).toBeTrue();
+        expect(links.some(link => link.getAttribute('href') === '/terms')).toBeTrue();
+    });
+
     it('disables preference saving until the initial values load', async () => {
         let resolvePreferences!: (value: unknown) => void;
         auth.call.and.returnValue(new Promise(resolve => resolvePreferences = resolve));
