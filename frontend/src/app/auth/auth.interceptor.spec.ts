@@ -93,4 +93,35 @@ describe('authInterceptor', () => {
         await expectAsync(pending).toBeRejected();
         expect(navigate).toHaveBeenCalledWith('/login');
     });
+
+    it('authorizes action-item and sharing requests but never external origins', async () => {
+        const actionPending = firstValueFrom(client.patch('/api/action-items/item-1', {done: true}));
+        const action = http.expectOne('/api/action-items/item-1');
+        expect(action.request.headers.get('Authorization')).toBe('Bearer old-token');
+        action.flush({done: true});
+
+        const sharingPending = firstValueFrom(client.get('/api/sharing/contacts'));
+        const sharing = http.expectOne('/api/sharing/contacts');
+        expect(sharing.request.headers.get('Authorization')).toBe('Bearer old-token');
+        sharing.flush([]);
+
+        const externalPending = firstValueFrom(client.get('https://example.com/api/notes'));
+        const external = http.expectOne('https://example.com/api/notes');
+        expect(external.request.headers.has('Authorization')).toBeFalse();
+        external.flush({});
+
+        await expectAsync(Promise.all([actionPending, sharingPending, externalPending])).toBeResolved();
+    });
+
+    it('refreshes and retries an action-item request through the actual interceptor pipeline', async () => {
+        const pending = firstValueFrom(client.delete('/api/action-items/item-1'));
+        rejectAsUnauthorized(http.expectOne('/api/action-items/item-1'));
+        http.expectOne('/api/auth/refresh').flush({access_token: 'new-token', user});
+        await new Promise(resolve => setTimeout(resolve, 0));
+
+        const retry = http.expectOne('/api/action-items/item-1');
+        expect(retry.request.headers.get('Authorization')).toBe('Bearer new-token');
+        retry.flush(null);
+        await expectAsync(pending).toBeResolved();
+    });
 });

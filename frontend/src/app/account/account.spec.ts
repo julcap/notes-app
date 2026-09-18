@@ -65,11 +65,76 @@ describe('Account', () => {
         const navigate = spyOn(TestBed.inject(Router), 'navigateByUrl').and.resolveTo(true);
         await component.deleteAccount();
 
-        expect(auth.call).toHaveBeenCalledOnceWith('DELETE', 'me', {
+        expect(auth.call).toHaveBeenCalledWith('DELETE', 'me', {
             password: '',
             confirmation: 'delete account'
         });
         expect(auth.clear).toHaveBeenCalled();
         expect(navigate).toHaveBeenCalledOnceWith('/login');
+    });
+
+    it('disables preference saving until the initial values load', async () => {
+        let resolvePreferences!: (value: unknown) => void;
+        auth.call.and.returnValue(new Promise(resolve => resolvePreferences = resolve));
+        const loadingFixture = TestBed.createComponent(Account);
+        loadingFixture.detectChanges();
+        const saveButton = Array.from(
+            loadingFixture.nativeElement.querySelectorAll('button') as NodeListOf<HTMLButtonElement>
+        ).find(button => button.textContent?.includes('Save notification preferences'))!;
+
+        expect(saveButton.disabled).toBeTrue();
+        resolvePreferences({
+            reminders_enabled: false,
+            digest_enabled: false,
+            reminder_lead_minutes: 10
+        });
+        await loadingFixture.whenStable();
+        loadingFixture.detectChanges();
+        expect(saveButton.disabled).toBeFalse();
+    });
+
+    it('keeps preference saving disabled when the initial load fails', async () => {
+        auth.call.and.rejectWith(new Error('network unavailable'));
+        const failedFixture = TestBed.createComponent(Account);
+        failedFixture.detectChanges();
+        await failedFixture.whenStable();
+        failedFixture.detectChanges();
+        const saveButton = Array.from(
+            failedFixture.nativeElement.querySelectorAll('button') as NodeListOf<HTMLButtonElement>
+        ).find(button => button.textContent?.includes('Save notification preferences'))!;
+
+        expect(saveButton.disabled).toBeTrue();
+    });
+
+    it('loads and saves opt-in notification preferences', async () => {
+        auth.call.and.resolveTo({
+            reminders_enabled: false,
+            digest_enabled: true,
+            reminder_lead_minutes: 30
+        });
+
+        await component.loadNotificationPreferences();
+
+        expect(auth.call).toHaveBeenCalledWith('GET', 'notification-preferences');
+        expect(component.remindersEnabled).toBeFalse();
+        expect(component.digestEnabled).toBeTrue();
+        expect(component.reminderLeadMinutes).toBe(30);
+
+        component.remindersEnabled = true;
+        component.reminderLeadMinutes = 45;
+        auth.call.calls.reset();
+        auth.call.and.resolveTo({
+            reminders_enabled: true,
+            digest_enabled: true,
+            reminder_lead_minutes: 45
+        });
+        await component.saveNotificationPreferences();
+
+        expect(auth.call).toHaveBeenCalledOnceWith('PUT', 'notification-preferences', {
+            reminders_enabled: true,
+            digest_enabled: true,
+            reminder_lead_minutes: 45
+        });
+        expect(component.message).toBe('Notification preferences saved.');
     });
 });

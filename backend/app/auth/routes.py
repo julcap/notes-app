@@ -2,20 +2,27 @@ import secrets
 
 import bcrypt
 from fastapi import BackgroundTasks, Depends, HTTPException, Request, Response
-from sqlalchemy import delete, select, text, update
+from sqlalchemy import delete, or_, select, text, update
 from sqlalchemy.orm import Session
 
 from ..database import db, now
-from ..notes.models import Note
-from ..storage import STORAGE
+from ..jobs import try_reconcile_quarantine
+from ..notes.models import MeetingShare, Note
+from ..notes.permissions import lock_account
+from ..observability import log_auth_event
+from ..storage import FILE_CLEANUP_LOCK_ID, storage
 from . import totp
 from .config import APP_URL, SECURE
 from .email import deliver_email, email_link
 from .models import BackupCode, EmailToken, Identity, RefreshToken, User
 from .router import router
-from .schemas import ChangePassword, DeleteAccount, EmailInput, Login, Login2FA, ProfileUpdate, Registration, Reset, TokenInput, TotpCode, TotpDisable
+from .schemas import ChangePassword, DeleteAccount, EmailInput, Login, Login2FA, NotificationPreferences, ProfileUpdate, Registration, Reset, TokenInput, TotpCode, TotpDisable
 from .security import DUMMY_HASH, check_password, digest, limit, password_hash, same_origin
 from .tokens import access, consume, consume_mfa, cookie, current_user, issue, mfa_challenge, profile, refresh_row
+
+
+def quarantine_files(keys):
+    return storage.quarantine(keys)
 
 
 def verify_totp_or_backup_code(session, user, code):
@@ -51,21 +58,32 @@ def login(data: Login, request: Request, response: Response, session: Session = 
     if not user:
         social = session.scalar(select(User).where(User.email == data.email))
         if social:
+            log_auth_event('login', 'failure', 'password')
             raise HTTPException(400, f'Use {social.auth_provider.title()} to sign in to this account.')
     if not user or not valid or len(data.password.encode()) > 72:
+        log_auth_event('login', 'failure', 'password')
         raise HTTPException(401, 'Email or password is incorrect.')
     if user.totp_enabled:
         return {'mfa_required': True, 'mfa_token': mfa_challenge(user, data.remember)}
-    return issue(user, response, session, data.remember)
+    result = issue(user, response, session, data.remember)
+    log_auth_event('login', 'success', 'password')
+    return result
 
 
 @router.post('/login/2fa', dependencies=[Depends(same_origin)])
 def login_2fa(data: Login2FA, request: Request, response: Response, session: Session = Depends(db)):
     limit(request, 'login-2fa', 15)
-    user, remember = consume_mfa(data.mfa_token, session)
+    try:
+        user, remember = consume_mfa(data.mfa_token, session)
+    except HTTPException:
+        log_auth_event('login', 'failure', 'two_factor')
+        raise
     if not verify_totp_or_backup_code(session, user, data.code):
+        log_auth_event('login', 'failure', 'two_factor')
         raise HTTPException(401, 'Invalid code.')
-    return issue(user, response, session, remember)
+    result = issue(user, response, session, remember)
+    log_auth_event('login', 'success', 'two_factor')
+    return result
 
 
 @router.post('/refresh', dependencies=[Depends(same_origin)])
@@ -95,6 +113,31 @@ def me(user: User = Depends(current_user)):
     return profile(user)
 
 
+def notification_preferences_for(user):
+    return {
+        'reminders_enabled': user.reminders_enabled,
+        'digest_enabled': user.digest_enabled,
+        'reminder_lead_minutes': user.reminder_lead_minutes,
+    }
+
+
+@router.get('/notification-preferences', response_model=NotificationPreferences)
+def get_notification_preferences(user: User = Depends(current_user)):
+    return notification_preferences_for(user)
+
+
+@router.put('/notification-preferences', response_model=NotificationPreferences, dependencies=[Depends(same_origin)])
+def update_notification_preferences(
+    data: NotificationPreferences,
+    user: User = Depends(current_user),
+    session: Session = Depends(db),
+):
+    for key, value in data.model_dump().items():
+        setattr(user, key, value)
+    session.commit()
+    return notification_preferences_for(user)
+
+
 @router.post('/forgot-password', dependencies=[Depends(same_origin)])
 def forgot(data: EmailInput, request: Request, tasks: BackgroundTasks, session: Session = Depends(db)):
     limit(request, 'forgot-password', 5)
@@ -105,6 +148,7 @@ def forgot(data: EmailInput, request: Request, tasks: BackgroundTasks, session: 
     elif users:
         providers = ', '.join(sorted({u.auth_provider.title() for u in users}))
         tasks.add_task(deliver_email, data.email, 'Sign in to Minutes', f'Your account uses {providers}. Use that provider at {APP_URL}/login to sign in.')
+    log_auth_event('password_reset_requested', 'accepted')
     return {'message': "If that email exists, we've sent a link or sign-in instructions."}
 
 
@@ -193,18 +237,37 @@ def delete_account(data: DeleteAccount, request: Request, response: Response, us
             raise HTTPException(401, 'Incorrect password.')
     elif data.confirmation.strip().lower() != 'delete account':
         raise HTTPException(400, 'Type "delete account" to confirm.')
-    notes = session.scalars(select(Note).where(Note.owner_id == user.id)).all()
-    attachment_ids = [a.id for n in notes for a in n.attachments]
-    for note in notes:
-        session.delete(note)
-    session.execute(delete(RefreshToken).where(RefreshToken.user_id == user.id))
-    session.execute(delete(EmailToken).where(EmailToken.user_id == user.id))
-    session.execute(delete(Identity).where(Identity.user_id == user.id))
-    session.execute(delete(BackupCode).where(BackupCode.user_id == user.id))
-    session.delete(user)
-    session.commit()
-    for item in attachment_ids:
-        (STORAGE / item).unlink(missing_ok=True)
+    session.execute(
+        text('SELECT pg_advisory_xact_lock(:lock_id)'),
+        {'lock_id': FILE_CLEANUP_LOCK_ID},
+    )
+    lock_account(session, user.id)
+    locked_notes = session.scalars(
+        select(Note)
+        .where(or_(
+            Note.owner_id == user.id,
+            Note.id.in_(select(MeetingShare.note_id).where(MeetingShare.user_id == user.id)),
+        ))
+        .order_by(Note.id)
+        .with_for_update()
+    ).all()
+    notes = [note for note in locked_notes if note.owner_id == user.id]
+    object_keys = [a.object_key or a.id for n in notes for a in n.attachments]
+    quarantined = quarantine_files(object_keys)
+    try:
+        for note in notes:
+            session.delete(note)
+        session.execute(delete(RefreshToken).where(RefreshToken.user_id == user.id))
+        session.execute(delete(EmailToken).where(EmailToken.user_id == user.id))
+        session.execute(delete(Identity).where(Identity.user_id == user.id))
+        session.execute(delete(BackupCode).where(BackupCode.user_id == user.id))
+        session.delete(user)
+        session.commit()
+    except Exception:
+        session.rollback()
+        try_reconcile_quarantine()
+        raise
+    storage.discard(quarantined)
     response.delete_cookie('minutes_refresh', path='/api/auth', secure=SECURE, httponly=True, samesite='lax')
     response.delete_cookie('minutes_csrf', path='/', secure=SECURE, samesite='lax')
     return {'message': 'Your account and everything it owns have been deleted.'}
@@ -231,6 +294,7 @@ def confirm_2fa(data: TotpCode, request: Request, user: User = Depends(current_u
     if not secret:
         raise HTTPException(400, 'Start enrollment before confirming a code.')
     if not totp.verify_code(secret, data.code):
+        log_auth_event('2fa_enabled', 'failure')
         raise HTTPException(401, 'Invalid code.')
     user.totp_enabled = True
     session.execute(delete(BackupCode).where(BackupCode.user_id == user.id))
@@ -238,6 +302,7 @@ def confirm_2fa(data: TotpCode, request: Request, user: User = Depends(current_u
     for code in codes:
         session.add(BackupCode(user_id=user.id, code_hash=password_hash(code)))
     session.commit()
+    log_auth_event('2fa_enabled', 'success')
     return {'message': 'Two-factor authentication is enabled.', 'backup_codes': codes}
 
 
@@ -248,9 +313,11 @@ def disable_2fa(data: TotpDisable, request: Request, user: User = Depends(curren
         raise HTTPException(400, 'Two-factor authentication is not enabled.')
     confirmed = (user.password_hash and check_password(data.password, user.password_hash)) or verify_totp_or_backup_code(session, user, data.code)
     if not confirmed:
+        log_auth_event('2fa_disabled', 'failure')
         raise HTTPException(401, 'Enter your current password or a valid code to disable two-factor authentication.')
     user.totp_enabled = False
     user.totp_secret = None
     session.execute(delete(BackupCode).where(BackupCode.user_id == user.id))
     session.commit()
+    log_auth_event('2fa_disabled', 'success')
     return {'message': 'Two-factor authentication is disabled.'}

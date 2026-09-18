@@ -16,7 +16,7 @@ From the **Account** page (linked from the nav rail and header once signed in), 
 
 | Setting | Required value |
 | --- | --- |
-| `AUTH_SECRET` | Strong random secret shared across backend workers; keep in `minutes-secrets` under `auth-secret` |
+| `AUTH_SECRET` | Strong random secret shared across backend workers; keep in `<namespace>-secrets` under `auth-secret` |
 | `APP_URL` | Exact HTTPS frontend origin, without trailing slash |
 | `COOKIE_SECURE` | `true` (default); false only permitted for localhost HTTP development |
 | `MAIL_MODE` | `ses` (default) |
@@ -26,9 +26,9 @@ From the **Account** page (linked from the nav rail and header once signed in), 
 | `FACEBOOK_CLIENT_ID`, `FACEBOOK_CLIENT_SECRET` | Meta app credentials |
 | `AMAZON_CLIENT_ID`, `AMAZON_CLIENT_SECRET` | Login with Amazon Security Profile credentials |
 
-Create `minutes-oauth` as a Kubernetes Secret with the provider variable names as keys. The backend imports it via `envFrom`; secrets never go into the Angular bundle. Provider buttons are unavailable until both ID and secret are configured. Restart the backend after changing them.
+Create `<namespace>-oauth` (`minutes-staging-oauth` or `minutes-production-oauth`) with the provider variable names as keys. Use different provider registrations and exact callback domains per environment. The backend imports it via `envFrom`; secrets never go into the Angular bundle. Provider buttons are unavailable until both ID and secret are configured. Restart the backend after changing them.
 
-`deploy/service-account.yaml` uses an IRSA role (`SES_ROLE_ARN`) trusted by `system:serviceaccount:minutes:minutes-backend`. Grant this role `ses:SendEmail` scoped to your verified identity. Do not provide static AWS keys to the frontend. The cluster must support IAM roles for service accounts and allow outbound HTTPS to SES and the provider APIs. SES sandbox accounts require verified recipients; request production access for arbitrary recipients. Delivery failures are logged without message bodies, tokens, or recipient addresses; users can retry through resend/recovery. Delivery currently runs as an in-process background task, not a durable queue, so a crash can lose an email; a fresh resend issues a new link.
+`deploy/service-account.yaml` uses an environment-specific IRSA role (`SES_ROLE_ARN`) trusted by `system:serviceaccount:minutes-staging:minutes-backend` or `system:serviceaccount:minutes-production:minutes-backend`. Grant each role `ses:SendEmail` scoped to that environment's verified identity. Do not provide static AWS keys to the frontend. The cluster must support IAM roles for service accounts and allow outbound HTTPS to SES and the provider APIs. SES sandbox accounts require verified recipients; request production access for arbitrary recipients. Delivery failures are logged without message bodies, tokens, or recipient addresses; users can retry through resend/recovery. Delivery currently runs as an in-process background task, not a durable queue, so a crash can lose an email; a fresh resend issues a new link.
 
 Register these exact callback URLs in provider consoles (substitute your production domain; use localhost:8080 for Docker development):
 

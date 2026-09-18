@@ -2,7 +2,7 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: uploads
-  namespace: minutes
+  namespace: ${KUBE_NAMESPACE}
 spec:
   accessModes: [ReadWriteOnce]
   storageClassName: gp3
@@ -14,7 +14,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: backend
-  namespace: minutes
+  namespace: ${KUBE_NAMESPACE}
 spec:
   replicas: 1
   strategy:
@@ -30,24 +30,6 @@ spec:
         runAsNonRoot: true
         runAsUser: 10001
         fsGroup: 10001
-      initContainers:
-        - name: database-migrations
-          image: ${BACKEND_IMAGE}
-          command: ["python", "-m", "app.init_db"]
-          env:
-            - name: DATABASE_URL
-              valueFrom:
-                secretKeyRef: {name: minutes-secrets, key: database-url}
-            - name: AUTH_SECRET
-              valueFrom:
-                secretKeyRef: {name: minutes-secrets, key: auth-secret}
-            - name: APP_URL
-              value: https://${APP_DOMAIN}
-            - name: COOKIE_SECURE
-              value: 'true'
-          securityContext:
-            allowPrivilegeEscalation: false
-            capabilities: {drop: [ALL]}
       containers:
         - name: backend
           image: ${BACKEND_IMAGE}
@@ -55,12 +37,12 @@ spec:
           env:
             - name: DATABASE_URL
               valueFrom:
-                secretKeyRef: {name: minutes-secrets, key: database-url}
+                secretKeyRef: {name: "${KUBE_NAMESPACE}-secrets", key: database-url}
             - name: UPLOAD_DIR
               value: /data/uploads
             - name: AUTH_SECRET
               valueFrom:
-                secretKeyRef: {name: minutes-secrets, key: auth-secret}
+                secretKeyRef: {name: "${KUBE_NAMESPACE}-secrets", key: auth-secret}
             - name: APP_URL
               value: https://${APP_DOMAIN}
             - name: COOKIE_SECURE
@@ -71,9 +53,23 @@ spec:
               value: ${SES_FROM_EMAIL}
             - name: AWS_REGION
               value: ${AWS_REGION}
+            - name: SENTRY_DSN
+              valueFrom:
+                secretKeyRef: {name: "${KUBE_NAMESPACE}-observability", key: sentry-dsn, optional: true}
+            - name: SENTRY_ENVIRONMENT
+              value: ${DEPLOY_ENVIRONMENT}
+            - name: SENTRY_RELEASE
+              value: "${SENTRY_RELEASE}"
+            - name: METRICS_ENABLED
+              value: "${METRICS_ENABLED}"
+            - name: METRICS_TOKEN
+              valueFrom:
+                secretKeyRef: {name: "${KUBE_NAMESPACE}-observability", key: metrics-token, optional: true}
+            - name: TRUSTED_PROXY_IPS
+              value: "${TRUSTED_PROXY_IPS}"
           envFrom:
             - secretRef:
-                name: minutes-oauth
+                name: ${KUBE_NAMESPACE}-oauth
                 optional: true
           volumeMounts: [{name: uploads, mountPath: /data/uploads}]
           readinessProbe:
@@ -94,14 +90,185 @@ spec:
 ---
 apiVersion: v1
 kind: Service
-metadata: {name: backend, namespace: minutes}
+metadata: {name: backend, namespace: "${KUBE_NAMESPACE}"}
 spec:
   selector: {app: backend}
   ports: [{port: 8000, targetPort: 8000}]
 ---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: purge-deleted-notes
+  namespace: ${KUBE_NAMESPACE}
+spec:
+  schedule: '${PURGE_SCHEDULE}'
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels: {app: purge-deleted-notes}
+        spec:
+          restartPolicy: Never
+          affinity:
+            podAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                - labelSelector:
+                    matchLabels: {app: backend}
+                  topologyKey: kubernetes.io/hostname
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            fsGroup: 10001
+          containers:
+            - name: purge-deleted-notes
+              image: ${BACKEND_IMAGE}
+              command: ["python", "-m", "app.jobs", "purge-deleted"]
+              env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef: {name: "${KUBE_NAMESPACE}-secrets", key: database-url}
+                - name: UPLOAD_DIR
+                  value: /data/uploads
+              volumeMounts: [{name: uploads, mountPath: /data/uploads}]
+              resources:
+                requests: {cpu: 50m, memory: 96Mi}
+                limits: {cpu: 500m, memory: 256Mi}
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities: {drop: [ALL]}
+          volumes:
+            - name: uploads
+              persistentVolumeClaim: {claimName: uploads}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cleanup-rate-limits
+  namespace: ${KUBE_NAMESPACE}
+spec:
+  schedule: '${RATE_LIMIT_CLEANUP_SCHEDULE}'
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels: {app: cleanup-rate-limits}
+        spec:
+          restartPolicy: Never
+          securityContext: {runAsNonRoot: true, runAsUser: 10001}
+          containers:
+            - name: cleanup-rate-limits
+              image: ${BACKEND_IMAGE}
+              command: ["python", "-m", "app.jobs", "cleanup-rate-limits"]
+              env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef: {name: "${KUBE_NAMESPACE}-secrets", key: database-url}
+              resources:
+                requests: {cpu: 10m, memory: 48Mi}
+                limits: {cpu: 100m, memory: 96Mi}
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities: {drop: [ALL]}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: meeting-reminders
+  namespace: ${KUBE_NAMESPACE}
+spec:
+  schedule: '${REMINDER_SCHEDULE}'
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels: {app: meeting-reminders}
+        spec:
+          serviceAccountName: minutes-backend
+          restartPolicy: Never
+          securityContext: {runAsNonRoot: true, runAsUser: 10001}
+          containers:
+            - name: meeting-reminders
+              image: ${BACKEND_IMAGE}
+              command: ["python", "-m", "app.jobs", "reminders"]
+              env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef: {name: "${KUBE_NAMESPACE}-secrets", key: database-url}
+                - name: AUTH_SECRET
+                  valueFrom:
+                    secretKeyRef: {name: "${KUBE_NAMESPACE}-secrets", key: auth-secret}
+                - name: APP_URL
+                  value: https://${APP_DOMAIN}
+                - name: COOKIE_SECURE
+                  value: 'true'
+                - name: MAIL_MODE
+                  value: ses
+                - name: SES_FROM_EMAIL
+                  value: ${SES_FROM_EMAIL}
+                - name: AWS_REGION
+                  value: ${AWS_REGION}
+              resources:
+                requests: {cpu: 25m, memory: 64Mi}
+                limits: {cpu: 250m, memory: 192Mi}
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities: {drop: [ALL]}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: weekly-digests
+  namespace: ${KUBE_NAMESPACE}
+spec:
+  schedule: '${DIGEST_SCHEDULE}'
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels: {app: weekly-digests}
+        spec:
+          serviceAccountName: minutes-backend
+          restartPolicy: Never
+          securityContext: {runAsNonRoot: true, runAsUser: 10001}
+          containers:
+            - name: weekly-digests
+              image: ${BACKEND_IMAGE}
+              command: ["python", "-m", "app.jobs", "weekly-digest"]
+              env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef: {name: "${KUBE_NAMESPACE}-secrets", key: database-url}
+                - name: AUTH_SECRET
+                  valueFrom:
+                    secretKeyRef: {name: "${KUBE_NAMESPACE}-secrets", key: auth-secret}
+                - name: APP_URL
+                  value: https://${APP_DOMAIN}
+                - name: COOKIE_SECURE
+                  value: 'true'
+                - name: MAIL_MODE
+                  value: ses
+                - name: SES_FROM_EMAIL
+                  value: ${SES_FROM_EMAIL}
+                - name: AWS_REGION
+                  value: ${AWS_REGION}
+              resources:
+                requests: {cpu: 25m, memory: 64Mi}
+                limits: {cpu: 250m, memory: 192Mi}
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities: {drop: [ALL]}
+---
 apiVersion: apps/v1
 kind: Deployment
-metadata: {name: frontend, namespace: minutes}
+metadata: {name: frontend, namespace: "${KUBE_NAMESPACE}"}
 spec:
   replicas: 2
   selector:
@@ -115,6 +282,13 @@ spec:
         - name: frontend
           image: ${FRONTEND_IMAGE}
           ports: [{containerPort: 8080}]
+          env:
+            - name: FRONTEND_SENTRY_DSN
+              value: "${FRONTEND_SENTRY_DSN}"
+            - name: SENTRY_ENVIRONMENT
+              value: ${DEPLOY_ENVIRONMENT}
+            - name: SENTRY_RELEASE
+              value: "${SENTRY_RELEASE}"
           readinessProbe:
             httpGet: {path: /healthz, port: 8080}
           livenessProbe:
@@ -128,7 +302,7 @@ spec:
 ---
 apiVersion: v1
 kind: Service
-metadata: {name: frontend, namespace: minutes}
+metadata: {name: frontend, namespace: "${KUBE_NAMESPACE}"}
 spec:
   selector: {app: frontend}
   ports: [{port: 80, targetPort: 8080}]

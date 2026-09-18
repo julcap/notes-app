@@ -1,6 +1,8 @@
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 
 class NoteInput(BaseModel):
@@ -8,6 +10,7 @@ class NoteInput(BaseModel):
     content: str = Field(default='', max_length=100000)
     attendees: str = Field(default='', max_length=1000)
     meeting_date: date
+    scheduled_at: datetime | None = None
 
     @field_validator('title')
     @classmethod
@@ -16,12 +19,20 @@ class NoteInput(BaseModel):
             raise ValueError('Title cannot be blank')
         return value.strip()
 
+    @field_validator('scheduled_at')
+    @classmethod
+    def scheduled_time_is_timezone_aware(cls, value):
+        if value is not None and value.tzinfo is None:
+            raise ValueError('Scheduled time must include a timezone')
+        return value.astimezone(timezone.utc) if value is not None else None
+
 
 class AttachmentOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
     filename: str
     size: int
+    content_type: str
 
 
 class ActionItemInput(BaseModel):
@@ -68,3 +79,47 @@ class NoteOut(NoteInput):
     updated_at: datetime
     attachments: list[AttachmentOut]
     action_items: list[ActionItemOut]
+    effective_permission: Literal['owner', 'edit', 'view']
+    is_owner: bool
+
+
+class NotePage(BaseModel):
+    items: list[NoteOut]
+    total: int
+
+
+class SharePermission(BaseModel):
+    permission: Literal['view', 'edit']
+
+
+class PreviousSharesInput(SharePermission):
+    user_ids: list[int] = Field(min_length=1)
+
+    @field_validator('user_ids')
+    @classmethod
+    def unique_user_ids(cls, value):
+        if len(value) != len(set(value)):
+            raise ValueError('Recipients must be unique')
+        return value
+
+
+class ShareByEmail(SharePermission):
+    email: EmailStr
+
+    @field_validator('email')
+    @classmethod
+    def normalize_email(cls, value):
+        return str(value).lower()
+
+
+class ShareOut(SharePermission):
+    user_id: int
+    email: str
+    display_name: str
+    shared_at: datetime
+
+
+class SharingContactOut(BaseModel):
+    user_id: int
+    email: str
+    display_name: str

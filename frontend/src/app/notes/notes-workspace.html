@@ -1,5 +1,5 @@
 <div class="shell">
-    <nav-rail active="notes" [notesCount]="notes.length" (logoutClick)="logout()"></nav-rail>
+    <nav-rail active="notes" [notesCount]="total" (logoutClick)="logout()"></nav-rail>
     <main>
         <header>
             <div class="breadcrumb">Workspace <span>/</span> Meeting notes</div>
@@ -17,6 +17,11 @@
             <button (click)="load()" *ngIf="!editing">Retry</button>
             <button (click)="error=''" aria-label="Dismiss error">×</button>
         </div>
+        <div *ngIf="undoNote" class="undo-toast" role="status">
+            <span>Meeting deleted</span>
+            <button class="text-btn" (click)="undoDelete()" [disabled]="busy">Undo</button>
+            <button class="text-btn" (click)="dismissUndo()" [disabled]="busy" aria-label="Dismiss undo">×</button>
+        </div>
         <div class="verification-banner" *ngIf="!auth.user?.email_verified">Check your inbox to verify your email before
             creating notes.
             <button class="text-btn" (click)="resend()">Resend email</button>
@@ -25,23 +30,27 @@
             <section class="note-list" aria-label="Meeting notes">
                 <div class="search-box"><span>⌕</span><input aria-label="Search notes"
                                                              placeholder="Search notes, people, anything…"
-                                                             [(ngModel)]="query">
-                    <button *ngIf="query" (click)="query=''" aria-label="Clear search">×</button>
+                                                             [(ngModel)]="query" (ngModelChange)="queueSearch($event)" [disabled]="busy">
+                    <button *ngIf="query" (click)="queueSearch('')" aria-label="Clear search" [disabled]="busy">×</button>
                 </div>
-                <div class="list-label">{{ query ? 'SEARCH RESULTS' : 'ALL NOTES' }} <span>{{ filtered.length }}</span>
+                <div class="list-label">{{ query ? 'SEARCH RESULTS' : 'ALL NOTES' }} <span>{{ total }}</span>
                 </div>
                 <div *ngIf="loading" class="empty-small">Loading your notes…</div>
-                <button *ngFor="let n of filtered" class="note-card" [class.active]="selected?.id===n.id"
+                <button *ngFor="let n of notes" class="note-card" [class.active]="selected?.id===n.id"
                         (click)="select(n)" [disabled]="busy">
-                    <div class="card-date">{{ n.meeting_date | date:'MMM d, yyyy' }} <span *ngIf="n.attachments.length">↗ {{ n.attachments.length }}</span>
+                    <div class="card-date">{{ n.meeting_date | date:'MMM d, yyyy' }}
+                        <span *ngIf="!n.is_owner">Shared · {{ n.effective_permission }}</span>
+                        <span *ngIf="n.attachments.length">↗ {{ n.attachments.length }}</span>
                     </div>
                     <h3>{{ n.title }}</h3>
                     <p>{{ n.content || 'No notes yet.' }}</p>
                     <div class="card-people">{{ n.attendees || 'Just you' }}</div>
                 </button>
-                <div *ngIf="!loading && !filtered.length"
+                <div *ngIf="!loading && !notes.length"
                      class="empty-small">{{ query ? 'No matching notes. Try another search.' : 'A fresh page awaits. Create your first meeting note.' }}
                 </div>
+                <button *ngIf="notes.length" class="secondary load-more" (click)="loadMore()"
+                        [disabled]="busy || loading || !hasMore">{{ hasMore ? (loading ? 'Loading…' : 'Load more') : 'All notes loaded' }}</button>
             </section>
             <section class="editor" [attr.aria-label]="editing ? 'Edit note' : 'Note details'">
                 <ng-container *ngIf="editing; else reading">
@@ -63,13 +72,12 @@
                                                                                            required maxlength="200">
                         <div class="form-meta"><label>Date<input type="date" name="date"
                                                                  [(ngModel)]="draft.meeting_date"
-                                                                 required></label><label>Attendees<input
+                                                                 required></label><label>Scheduled time (optional)<input
+                                type="datetime-local" name="scheduledAt" [(ngModel)]="draft.scheduled_at" [disabled]="!!selected && !isOwner"></label><label>Attendees<input
                                 name="attendees" placeholder="e.g. Alex, Jordan, you" [(ngModel)]="draft.attendees"
                                 maxlength="1000"></label></div>
-                        <label class="field-label" for="content">Notes</label><textarea id="content" name="content"
-                                                                                        [(ngModel)]="draft.content"
-                                                                                        maxlength="100000"
-                                                                                        placeholder="Capture the context, decisions, and next steps…"></textarea>
+                        <label class="field-label" id="content-label">Notes</label>
+                        <markdown-editor labelledBy="content-label" [(value)]="draft.content"></markdown-editor>
                         <div class="editor-hint">{{ draft.content.length | number }} characters · Attach files after
                             saving
                         </div>
@@ -79,39 +87,87 @@
                     <ng-container *ngIf="selected as n; else welcome">
                         <div class="editor-toolbar"><span class="pill">MEETING NOTE</span>
                             <div>
-                                <button class="text-btn danger" (click)="confirmDelete=true" [disabled]="busy">Delete
+                                <button class="text-btn" data-export-format="md" (click)="exportNote('md')"
+                                        [disabled]="busy">Export Markdown</button>
+                                <button class="text-btn" data-export-format="pdf" (click)="exportNote('pdf')"
+                                        [disabled]="busy">Export PDF</button>
+                                <button *ngIf="isOwner" class="text-btn" data-action="share-note" (click)="openSharing()"
+                                        [disabled]="busy">Share</button>
+                                <button *ngIf="isOwner" class="text-btn danger" data-action="delete-note" (click)="remove()" [disabled]="busy">Delete
                                 </button>
-                                <button class="secondary" (click)="edit()" [disabled]="busy">✎ &nbsp; Edit note</button>
+                                <button *ngIf="canEdit" class="secondary" data-action="edit-note" (click)="edit()" [disabled]="busy">✎ &nbsp; Edit note</button>
                             </div>
                         </div>
-                        <div *ngIf="confirmDelete" class="delete-confirm" role="alert">Delete this note and its
-                            attachments? This cannot be undone.
-                            <div>
-                                <button class="text-btn" (click)="confirmDelete=false">Cancel</button>
-                                <button class="primary danger-fill" (click)="remove()" [disabled]="busy">Delete note
+
+                        <section *ngIf="sharingOpen && isOwner" class="sharing-panel" aria-label="Sharing settings">
+                            <div class="attachment-heading"><h4>Collaborators <span>{{ shares.length }}</span></h4>
+                                <button class="text-btn" (click)="sharingOpen=false">Close</button></div>
+                            <div *ngFor="let share of shares" class="file-row">
+                                <span>{{ share.display_name || share.email }} <small>{{ share.email }}</small></span>
+                                <select [ngModel]="share.permission"
+                                        (ngModelChange)="updateShare(share, $event)" [disabled]="busy"
+                                        [attr.aria-label]="'Permission for '+share.email">
+                                    <option value="view">Can view</option>
+                                    <option value="edit">Can edit</option>
+                                </select>
+                                <button (click)="removeShare(share)" [disabled]="busy"
+                                        [attr.aria-label]="'Remove '+share.email">×</button>
+                            </div>
+                            <form class="action-item-form" (ngSubmit)="addShare()">
+                                <input type="email" name="share-email" [(ngModel)]="shareEmail"
+                                       placeholder="Verified user email" aria-label="Sharing recipient email" required>
+                                <select name="share-permission" [(ngModel)]="sharePermission" aria-label="Sharing permission">
+                                    <option value="view">Can view</option>
+                                    <option value="edit">Can edit</option>
+                                </select>
+                                <button class="secondary" type="submit" [disabled]="busy || !shareEmail.trim()">Share</button>
+                            </form>
+                            <div *ngIf="sharingContacts.length" class="action-item-form">
+                                <span>Previous recipients:</span>
+                                <span *ngFor="let contact of sharingContacts" class="sharing-contact">{{ contact.email }}</span>
+                                <select [(ngModel)]="previousPermission" aria-label="Previous recipients permission">
+                                    <option value="view">Can view</option>
+                                    <option value="edit">Can edit</option>
+                                </select>
+                                <button class="secondary" type="button" (click)="shareWithPrevious()" [disabled]="busy">
+                                    Review and share with previous recipients
                                 </button>
                             </div>
-                        </div>
+                        </section>
+
                         <h2>{{ n.title }}</h2>
                         <div class="detail-meta">
-                            <span>▦ &nbsp; {{ n.meeting_date | date:'EEEE, MMMM d, yyyy' }}</span><span>♧ &nbsp; {{ n.attendees || 'Just you' }}</span>
+                            <span>▦ &nbsp; {{ n.meeting_date | date:'EEEE, MMMM d, yyyy' }}</span>
+                            <span *ngIf="n.scheduled_at">◷ &nbsp; {{ n.scheduled_at | date:'EEEE, MMMM d, yyyy, h:mm a' }}</span>
+                            <span>♧ &nbsp; {{ n.attendees || 'Just you' }}</span>
                         </div>
                         <div class="divider"></div>
                         <div class="section-label">THE CONVERSATION</div>
-                        <div class="note-body">{{ n.content || 'No notes added yet. Edit this meeting to capture the conversation.' }}</div>
+                        <markdown-renderer class="note-body"
+                                           [source]="n.content || 'No notes added yet. Edit this meeting to capture the conversation.'"></markdown-renderer>
                         <div class="attachments">
                             <div class="attachment-heading"><h4>Attachments <span>{{ n.attachments.length }}</span></h4>
-                                <label class="text-btn upload" [class.disabled]="busy">＋ Add file<input type="file"
+                                <label *ngIf="canEdit" class="text-btn upload" [class.disabled]="busy">＋ Add file<input type="file"
                                                                                                         (change)="upload($event)"
                                                                                                         [disabled]="busy"
                                                                                                         aria-label="Upload attachment"></label>
                             </div>
-                            <div *ngFor="let a of n.attachments" class="file-row"><span class="file-icon">↗</span>
-                                <button class="file-download" (click)="downloadFile(a)">{{ a.filename }}
-                                    <small>{{ a.size / 1024 | number:'1.0-1' }} KB</small></button>
-                                <button (click)="removeFile(a)" [disabled]="busy"
-                                        [attr.aria-label]="'Remove '+a.filename">×
-                                </button>
+                            <div *ngFor="let a of n.attachments" class="attachment-card">
+                                <ng-container *ngIf="attachmentPreview(a) as preview">
+                                    <img *ngIf="preview.kind === 'image'" class="attachment-preview-image"
+                                         [src]="preview.url" [alt]="'Preview of ' + a.filename">
+                                    <iframe *ngIf="preview.kind === 'pdf'" class="attachment-preview-pdf"
+                                            [src]="preview.resourceUrl" sandbox
+                                            [title]="'Preview of ' + a.filename"></iframe>
+                                </ng-container>
+                                <div class="file-row"><span class="file-icon">↗</span>
+                                    <button class="file-download" (click)="downloadFile(a)"
+                                            [attr.aria-label]="'Download '+a.filename">{{ a.filename }}
+                                        <small>{{ a.size / 1024 | number:'1.0-1' }} KB</small></button>
+                                    <button *ngIf="canEdit" (click)="removeFile(a)" [disabled]="busy"
+                                            [attr.aria-label]="'Remove '+a.filename">×
+                                    </button>
+                                </div>
                             </div>
                             <div *ngIf="!n.attachments.length" class="file-empty">Keep the full picture. Add documents,
                                 slides, or images.<small>Up to 20 MB per file</small></div>
@@ -121,19 +177,19 @@
                             </div>
                             <div *ngFor="let item of n.action_items" class="action-item-row">
                                 <input type="checkbox" [checked]="item.done" (change)="toggleActionItem(item)"
-                                       [disabled]="busy" [attr.aria-label]="(item.done ? 'Mark not done: ' : 'Mark done: ') + item.text">
+                                       [disabled]="busy || !canEdit" [attr.aria-label]="(item.done ? 'Mark not done: ' : 'Mark done: ') + item.text">
                                 <div class="action-item-body" [class.done]="item.done">
                                     <span class="action-item-text">{{ item.text }}</span>
                                     <span class="action-item-meta" *ngIf="item.owner_name || item.due_date">{{ item.owner_name
                                         }}<ng-container *ngIf="item.owner_name && item.due_date"> · </ng-container>{{ item.due_date ? ('Due ' + (item.due_date | date:'MMM d')) : '' }}</span>
                                 </div>
-                                <button (click)="removeActionItem(item)" [disabled]="busy"
+                                <button *ngIf="canEdit" (click)="removeActionItem(item)" [disabled]="busy"
                                         [attr.aria-label]="'Remove '+item.text">×
                                 </button>
                             </div>
                             <div *ngIf="!n.action_items.length" class="file-empty">No action items yet. Track the
                                 follow-ups below.</div>
-                            <form class="action-item-form" (ngSubmit)="addActionItem()">
+                            <form *ngIf="canEdit" class="action-item-form" (ngSubmit)="addActionItem()">
                                 <input name="action-item-text" placeholder="Add an action item…"
                                        [(ngModel)]="newActionItem.text" maxlength="500" [disabled]="busy"
                                        aria-label="Action item text">

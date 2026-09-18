@@ -2,7 +2,7 @@
 
 2026-09-17 · split from `03 Feature Roadmap (Post-MVP).md`
 
-**Status: done**, shipped 2026-09-17 (commit "Add action items to meeting notes"). This was the other half of the original roadmap doc's "richer notes" section — the markdown-formatting half is tracked separately in [02 Rich text notes formatting](./02%20Rich%20text%20notes%20formatting.md).
+**Status: done**, shipped 2026-09-17 (commit "Add action items to meeting notes"). This was the other half of the original roadmap doc's "richer notes" section — the markdown-formatting half is tracked separately in [02 - done - Rich text notes formatting](./02%20-%20done%20-%20Rich%20text%20notes%20formatting.md).
 
 ## Problem
 

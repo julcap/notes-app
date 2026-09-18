@@ -1,0 +1,19 @@
+<div class="markdown-toolbar" role="toolbar" aria-label="Markdown formatting">
+    @if (!preview) {
+    <div class="markdown-actions">
+        <button type="button" class="text-btn" aria-label="Bold" title="Bold" (click)="applyBold()"><strong>B</strong></button>
+        <button type="button" class="text-btn" aria-label="Heading" title="Heading" (click)="applyLine('## ', 'Heading')">H</button>
+        <button type="button" class="text-btn" aria-label="Bulleted list" title="Bulleted list" (click)="applyLine('- ', 'List item')">• List</button>
+        <button type="button" class="text-btn" aria-label="Checklist" title="Checklist" (click)="applyLine('- [ ] ', 'Action item')">☐ Task</button>
+    </div>
+    }
+    <button type="button" class="text-btn preview-toggle" [attr.aria-label]="preview ? 'Edit markdown' : 'Preview markdown'"
+            [attr.aria-pressed]="preview" (click)="preview = !preview">{{ preview ? 'Edit' : 'Preview' }}</button>
+</div>
+@if (preview) {
+    <markdown-renderer class="markdown-preview" [source]="value"></markdown-renderer>
+} @else {
+    <textarea #textarea [value]="value" maxlength="100000" [attr.aria-labelledby]="labelledBy"
+              placeholder="Capture the context, decisions, and next steps…"
+              (input)="value = textarea.value; valueChange.emit(value)"></textarea>
+}

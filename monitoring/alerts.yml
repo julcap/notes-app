@@ -1,0 +1,40 @@
+groups:
+  - name: minutes-api-alerts
+    interval: 1m
+    rules:
+      - alert: MinutesHigh5xxRate
+        expr: |
+          (
+            sum(increase(http_requests_total{job="minutes-backend",status=~"5.."}[5m]))
+            /
+            sum(increase(http_requests_total{job="minutes-backend"}[5m]))
+          ) > 0.05
+          and
+          sum(increase(http_requests_total{job="minutes-backend"}[5m])) >= 20
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: Minutes API error rate is above 5%
+          description: At least 20 requests occurred in five minutes and more than 5% returned 5xx for five minutes.
+          runbook_url: https://github.com/julcap/notes-app/blob/main/monitoring/README.md#error-rate-alert
+
+      - alert: MinutesHealthProbeFailed
+        expr: probe_success{job="minutes-health"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Minutes API health probe is failing
+          description: The external HTTP probe of /api/health has failed for two minutes; this verifies application and database health from the probe location.
+          runbook_url: https://github.com/julcap/notes-app/blob/main/monitoring/README.md#health-probe-alert
+
+      - alert: MinutesBackendScrapeDown
+        expr: up{job="minutes-backend"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Prometheus cannot scrape the Minutes backend
+          description: The private metrics target has been down for two minutes; this is scrape reachability, not an HTTP dependency-health check.
+          runbook_url: https://github.com/julcap/notes-app/blob/main/monitoring/README.md#scrape-target-down-alert

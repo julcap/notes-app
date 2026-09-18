@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: ${KUBE_NAMESPACE}
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+  template:
+    spec:
+      containers:
+        - name: backend
+          env:
+            - name: STORAGE_BACKEND
+              value: s3
+            - name: S3_BUCKET
+              value: ${S3_BUCKET}
+            - name: S3_PREFIX
+              value: ${S3_PREFIX}
+            - name: AWS_REGION
+              value: ${AWS_REGION}
+          volumeMounts: null
+      volumes: null
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: purge-deleted-notes
+  namespace: ${KUBE_NAMESPACE}
+spec:
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: minutes-backend
+          affinity: null
+          containers:
+            - name: purge-deleted-notes
+              env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef: {name: "${KUBE_NAMESPACE}-secrets", key: database-url}
+                - name: STORAGE_BACKEND
+                  value: s3
+                - name: S3_BUCKET
+                  value: ${S3_BUCKET}
+                - name: S3_PREFIX
+                  value: ${S3_PREFIX}
+                - name: AWS_REGION
+                  value: ${AWS_REGION}
+              volumeMounts: null
+          volumes: null

@@ -1,0 +1,15 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: human-webhook
+  group_by: [alertname]
+  group_wait: 30s
+  group_interval: 30m
+  repeat_interval: 30m
+
+receivers:
+  - name: human-webhook
+    webhook_configs:
+      - url_file: /etc/alertmanager/secrets/human-webhook-url
+        send_resolved: true

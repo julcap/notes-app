@@ -2,7 +2,7 @@
 
 2026-09-17 · split from `04 Production Readiness Gaps.md`
 
-**Status: done**, for the "not committed to the repo" core ask. `deploy/app.yaml` reads all credentials from Kubernetes Secrets (`minutes-secrets`: `database-url`, `auth-secret`; `minutes-oauth`, optional) via `secretKeyRef`/`envFrom`, never hardcoded in a manifest or committed file. CI deploy credentials use short-lived AWS OIDC federation (`aws-actions/configure-aws-credentials` with `role-to-assume`), not long-lived access keys.
+**Status: done**, for the "not committed to the repo" core ask. `deploy/app.yaml` reads credentials from environment-scoped Kubernetes Secrets (`minutes-staging-*` or `minutes-production-*`) via `secretKeyRef`/`envFrom`, never hardcoded in a manifest or committed file. CI deploy credentials use short-lived, GitHub Environment-scoped AWS OIDC federation (`aws-actions/configure-aws-credentials` with `role-to-assume`), not long-lived access keys.
 
 ## What was asked for
 
@@ -13,5 +13,5 @@
 ## What's actually done vs. what's an operational follow-up
 
 - **Done (structural):** no secret value lives in the repo; the manifests only reference Kubernetes Secret names, which are populated out-of-band.
-- **Not verifiable from code, and not this doc's job to verify:** whether the `AUTH_SECRET`/database password currently populating `minutes-secrets` are actually rotated dev→prod values, distinct from whatever was used locally. That's a one-time operational action (rotate the values in the cluster), not a code change — worth confirming directly against the cluster rather than tracking as a spec.
-- **Not done:** per-environment separation, since there is currently only one environment (`production`) — see [11 Staging environment](./11%20Staging%20environment.md). Until staging exists, "different secrets per environment" is moot; once it does, its secrets must be genuinely separate Kubernetes Secret objects/values, not the same ones reused.
+- **Not verifiable from code, and not this doc's job to verify:** whether the `AUTH_SECRET`/database passwords that will populate `minutes-staging-secrets` and `minutes-production-secrets` are rotated, distinct values. That is an operational action worth confirming directly against each cluster.
+- **Done (repository boundary):** [staging isolation](./11%20-%20done%20-%20Staging%20environment.md) renders different namespaces and Secret names and obtains all environment settings through separate GitHub Environments. Live Secret values, IAM boundaries, databases, storage prefixes, and sender identities still must be created and verified independently by an operator.

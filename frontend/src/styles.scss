@@ -15,7 +15,7 @@ body {
     margin: 0
 }
 
-button, input, textarea {
+button, input, textarea, select {
     font: inherit
 }
 
@@ -404,6 +404,11 @@ p {
     text-overflow: ellipsis
 }
 
+.load-more {
+    width: 100%;
+    margin-top: 8px
+}
+
 .editor {
     padding: 25px 32px;
     min-width: 0
@@ -459,12 +464,63 @@ h2 {
 }
 
 .note-body {
-    white-space: pre-wrap;
     overflow-wrap: anywhere;
     line-height: 1.9;
     font-size: 13px;
     color: #566a5c;
     min-height: 180px
+}
+
+markdown-renderer {
+    display: block
+}
+
+.markdown-content {
+    white-space: normal;
+    overflow-wrap: anywhere
+}
+
+.markdown-content > :first-child {
+    margin-top: 0
+}
+
+.markdown-content > :last-child {
+    margin-bottom: 0
+}
+
+.markdown-content h1, .markdown-content h2, .markdown-content h3,
+.markdown-content h4, .markdown-content h5, .markdown-content h6 {
+    color: #294935;
+    line-height: 1.35;
+    margin: 1.2em 0 .5em
+}
+
+.markdown-content h1 { font-size: 22px }
+.markdown-content h2 { font-size: 19px }
+.markdown-content h3 { font-size: 16px }
+
+.markdown-content ul, .markdown-content ol {
+    padding-left: 24px
+}
+
+.markdown-content pre, .markdown-content code {
+    background: #f3f6f1;
+    border-radius: 4px
+}
+
+.markdown-content code { padding: 2px 4px }
+
+.markdown-content pre {
+    overflow-x: auto;
+    padding: 12px
+}
+
+.markdown-content pre code { padding: 0 }
+
+.task-checkbox {
+    display: inline-block;
+    margin-right: 6px;
+    color: #5d815e
 }
 
 .attachments {
@@ -528,6 +584,34 @@ h4 span {
     margin: 8px 0;
     border: 1px solid #e6ece1;
     border-radius: 6px
+}
+
+.attachment-card {
+    margin: 10px 0
+}
+
+.attachment-card .file-row {
+    margin: 0
+}
+
+.attachment-preview-image, .attachment-preview-pdf {
+    display: block;
+    width: 100%;
+    max-height: 440px;
+    border: 1px solid #e6ece1;
+    border-bottom: 0;
+    border-radius: 6px 6px 0 0;
+    background: #f7f9f5;
+    object-fit: contain
+}
+
+.attachment-preview-pdf {
+    height: 440px
+}
+
+.attachment-preview-image + .file-row,
+.attachment-preview-pdf + .file-row {
+    border-radius: 0 0 6px 6px
 }
 
 .file-row a {
@@ -620,6 +704,34 @@ h4 span {
     min-width: 100px
 }
 
+.sharing-panel {
+    margin: 16px 0 24px;
+    padding: 16px;
+    border: 1px solid #dce6dc;
+    border-radius: 8px;
+    background: #fbfcfa
+}
+
+.sharing-panel .file-row > span {
+    flex: 1;
+    overflow-wrap: anywhere
+}
+
+.sharing-panel select, .action-item-form select {
+    border: 1px solid #dce6dc;
+    border-radius: 6px;
+    padding: 8px;
+    color: #3f6046;
+    background: white
+}
+
+.sharing-contact {
+    padding: 5px 8px;
+    border-radius: 12px;
+    background: #e8eee0;
+    font-size: 10px
+}
+
 footer {
     display: flex;
     justify-content: space-between;
@@ -694,6 +806,40 @@ textarea {
     font-size: 13px
 }
 
+.markdown-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    min-height: 34px;
+    padding: 5px 8px;
+    border: 1px solid #dde6dc;
+    border-bottom: 0;
+    border-radius: 7px 7px 0 0;
+    background: #f7f9f5
+}
+
+.markdown-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px
+}
+
+.markdown-toolbar + textarea {
+    display: block;
+    border-radius: 0 0 7px 7px
+}
+
+.markdown-preview {
+    min-height: 290px;
+    padding: 16px;
+    border: 1px solid #dde6dc;
+    border-radius: 0 0 7px 7px;
+    color: #415b45;
+    font-size: 13px;
+    line-height: 1.8
+}
+
 .editor-hint {
     font-size: 9px;
     color: #96a290;
@@ -745,8 +891,25 @@ textarea {
     float: right
 }
 
-.delete-confirm div {
-    margin-top: 10px
+.undo-toast {
+    position: fixed;
+    right: 24px;
+    bottom: 24px;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 18px;
+    border-radius: 8px;
+    background: #26382a;
+    color: #fff;
+    box-shadow: 0 8px 28px rgba(21, 37, 24, .24);
+    font-size: 13px
+}
+
+.undo-toast .text-btn {
+    color: #d8eed4;
+    font-weight: 700
 }
 
 .danger {

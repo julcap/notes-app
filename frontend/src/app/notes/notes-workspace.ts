@@ -1,25 +1,43 @@
-import {Component, HostListener, inject, OnInit} from '@angular/core';
+import {Component, HostListener, inject, OnDestroy, OnInit} from '@angular/core';
 import {CommonModule} from '@angular/common';
 import {FormsModule} from '@angular/forms';
 import {HttpClient} from '@angular/common/http';
 import {CanDeactivateFn, RouterLink} from '@angular/router';
+import {DomSanitizer, SafeResourceUrl} from '@angular/platform-browser';
 import {firstValueFrom} from 'rxjs';
 
 import {AuthService} from '../auth/auth.service';
 import {NavRail} from '../shell/nav-rail';
-import {ActionItem, Attachment, Note} from './note.model';
+import {ActionItem, Attachment, MeetingShare, Note, NotePage, SharingContact} from './note.model';
+import {MarkdownEditor} from './markdown-editor';
+import {MarkdownRenderer} from './markdown-renderer';
+import {localDateTimeToUtc, utcToLocalDateTime} from './scheduling';
+
+interface AttachmentPreview {
+    kind: 'image' | 'pdf';
+    url: string;
+    resourceUrl?: SafeResourceUrl;
+}
 
 @Component({
     selector: 'meeting-workspace',
     standalone: true,
-    imports: [CommonModule, FormsModule, RouterLink, NavRail],
+    imports: [CommonModule, FormsModule, RouterLink, NavRail, MarkdownEditor, MarkdownRenderer],
     templateUrl: './notes-workspace.html'
 })
-export class NotesWorkspace implements OnInit {
+export class NotesWorkspace implements OnInit, OnDestroy {
     private http = inject(HttpClient);
+    private sanitizer = inject(DomSanitizer);
+    private requestVersion = 0;
+    private previewVersion = 0;
+    private sharingRequestVersion = 0;
+    private searchTimer?: ReturnType<typeof setTimeout>;
+    private undoTimer?: ReturnType<typeof setTimeout>;
     auth = inject(AuthService);
 
     notes: Note[] = [];
+    total = 0;
+    readonly pageSize = 50;
     selected: Note | null = null;
     draft = this.blank();
     query = '';
@@ -28,8 +46,15 @@ export class NotesWorkspace implements OnInit {
     editing = false;
     error = '';
     message = '';
-    confirmDelete = false;
+    undoNote: Note | null = null;
     newActionItem = this.blankActionItem();
+    attachmentPreviews: Record<string, AttachmentPreview> = {};
+    sharingOpen = false;
+    shares: MeetingShare[] = [];
+    sharingContacts: SharingContact[] = [];
+    shareEmail = '';
+    sharePermission: 'view' | 'edit' = 'view';
+    previousPermission: 'view' | 'edit' = 'view';
 
     async logout() {
         if (this.dirty && !window.confirm('Discard unsaved changes and log out?')) return;
@@ -64,13 +89,132 @@ export class NotesWorkspace implements OnInit {
         }
     }
 
+    async exportNote(format: 'md' | 'pdf') {
+        if (!this.selected) return;
+        try {
+            const response = await firstValueFrom(this.http.get(
+                `/api/notes/${this.selected.id}/export`,
+                {params: {format}, observe: 'response', responseType: 'blob'}
+            ));
+            const disposition = response.headers.get('Content-Disposition') || '';
+            const filename = /^attachment; filename="([A-Za-z0-9._-]+)"$/.exec(disposition)?.[1]
+                || `meeting-note.${format}`;
+            const url = URL.createObjectURL(response.body!);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = filename;
+            link.click();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+        } catch {
+            this.error = `Could not export the note as ${format === 'pdf' ? 'PDF' : 'Markdown'}. Please try again.`;
+        }
+    }
+
+    async openSharing() {
+        if (!this.selected || !this.isOwner) return;
+        const noteId = this.selected.id;
+        const version = ++this.sharingRequestVersion;
+        this.sharingOpen = true;
+        this.shares = [];
+        this.sharingContacts = [];
+        this.error = '';
+        try {
+            const [shares, contacts] = await Promise.all([
+                firstValueFrom(this.http.get<MeetingShare[]>(`/api/notes/${noteId}/shares`)),
+                firstValueFrom(this.http.get<SharingContact[]>('/api/sharing/contacts'))
+            ]);
+            if (version !== this.sharingRequestVersion || this.selected?.id !== noteId) return;
+            this.shares = shares;
+            this.sharingContacts = contacts;
+        } catch {
+            if (version !== this.sharingRequestVersion || this.selected?.id !== noteId) return;
+            this.sharingOpen = false;
+            this.error = 'Could not load sharing settings. Please try again.';
+        }
+    }
+
+    async addShare() {
+        if (!this.selected || !this.isOwner || !this.shareEmail.trim() || this.busy) return;
+        this.busy = true;
+        this.error = '';
+        try {
+            const share = await firstValueFrom(this.http.post<MeetingShare>(
+                `/api/notes/${this.selected.id}/shares`,
+                {email: this.shareEmail.trim(), permission: this.sharePermission}
+            ));
+            this.shares = [...this.shares.filter(item => item.user_id !== share.user_id), share]
+                .sort((a, b) => a.email.localeCompare(b.email));
+            this.shareEmail = '';
+            this.message = 'Sharing updated';
+        } catch {
+            this.error = 'That verified sharing recipient could not be found.';
+            this.busy = false;
+            return;
+        }
+        try {
+            this.sharingContacts = await firstValueFrom(this.http.get<SharingContact[]>('/api/sharing/contacts'));
+        } catch {
+            this.error = 'Sharing was updated, but previous recipients could not be refreshed.';
+        } finally {
+            this.busy = false;
+        }
+    }
+
+    async updateShare(share: MeetingShare, permission: 'view' | 'edit') {
+        if (!this.selected || !this.isOwner || this.busy) return;
+        this.busy = true;
+        try {
+            const updated = await firstValueFrom(this.http.patch<MeetingShare>(
+                `/api/notes/${this.selected.id}/shares/${share.user_id}`,
+                {permission}
+            ));
+            this.shares = this.shares.map(item => item.user_id === updated.user_id ? updated : item);
+        } catch {
+            this.error = 'Could not update that collaborator.';
+        } finally {
+            this.busy = false;
+        }
+    }
+
+    async removeShare(share: MeetingShare) {
+        if (!this.selected || !this.isOwner || this.busy) return;
+        this.busy = true;
+        try {
+            await firstValueFrom(this.http.delete(`/api/notes/${this.selected.id}/shares/${share.user_id}`));
+            this.shares = this.shares.filter(item => item.user_id !== share.user_id);
+        } catch {
+            this.error = 'Could not remove that collaborator.';
+        } finally {
+            this.busy = false;
+        }
+    }
+
+    async shareWithPrevious() {
+        if (!this.selected || !this.isOwner || !this.sharingContacts.length || this.busy) return;
+        const recipients = this.sharingContacts.map(contact => contact.email).join(', ');
+        if (!window.confirm(`Share with ${recipients}?`)) return;
+        this.busy = true;
+        try {
+            this.shares = await firstValueFrom(this.http.post<MeetingShare[]>(
+                `/api/notes/${this.selected.id}/shares/previous`,
+                {permission: this.previousPermission, user_ids: this.sharingContacts.map(contact => contact.user_id)}
+            ));
+            this.message = 'Shared with previous recipients';
+        } catch {
+            this.error = 'Could not share with previous recipients.';
+        } finally {
+            this.busy = false;
+        }
+    }
+
     blank() {
         const d = new Date();
         return {
             title: '',
             content: '',
             attendees: '',
-            meeting_date: new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10)
+            meeting_date: new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10),
+            scheduled_at: ''
         };
     }
 
@@ -78,9 +222,16 @@ export class NotesWorkspace implements OnInit {
         return {text: '', owner_name: '', due_date: ''};
     }
 
-    get filtered() {
-        const q = this.query.trim().toLowerCase();
-        return this.notes.filter(n => `${n.title} ${n.content} ${n.attendees}`.toLowerCase().includes(q));
+    get hasMore() {
+        return this.notes.length < this.total;
+    }
+
+    get canEdit() {
+        return this.selected?.effective_permission === 'owner' || this.selected?.effective_permission === 'edit';
+    }
+
+    get isOwner() {
+        return this.selected?.is_owner === true;
     }
 
     get dirty() {
@@ -88,7 +239,13 @@ export class NotesWorkspace implements OnInit {
     }
 
     fields(n: Note) {
-        return {title: n.title, content: n.content, attendees: n.attendees, meeting_date: n.meeting_date};
+        return {
+            title: n.title,
+            content: n.content,
+            attendees: n.attendees,
+            meeting_date: n.meeting_date,
+            scheduled_at: utcToLocalDateTime(n.scheduled_at)
+        };
     }
 
     @HostListener('window:beforeunload', ['$event']) unload(e: BeforeUnloadEvent) {
@@ -99,26 +256,103 @@ export class NotesWorkspace implements OnInit {
         await this.load();
     }
 
-    async load() {
+    ngOnDestroy() {
+        if (this.searchTimer) clearTimeout(this.searchTimer);
+        if (this.undoTimer) clearTimeout(this.undoTimer);
+        this.clearAttachmentPreviews();
+    }
+
+    private invalidateListResponse() {
+        this.requestVersion++;
+        if (!this.searchTimer) this.loading = false;
+    }
+
+    private cancelListWork() {
+        this.requestVersion++;
+        this.loading = false;
+        if (this.searchTimer) {
+            clearTimeout(this.searchTimer);
+            this.searchTimer = undefined;
+        }
+    }
+
+    private async restoreListAfterMutation(operationError = '') {
+        await this.load();
+        if (operationError) this.error = operationError;
+    }
+
+    queueSearch(query: string) {
+        this.query = query;
+        this.requestVersion++;
+        if (this.searchTimer) clearTimeout(this.searchTimer);
+        this.loading = true;
+        this.searchTimer = setTimeout(() => {
+            this.searchTimer = undefined;
+            void this.load();
+        }, 300);
+    }
+
+    async load(reset = true) {
+        if (this.searchTimer) {
+            clearTimeout(this.searchTimer);
+            this.searchTimer = undefined;
+        }
+        const requestVersion = ++this.requestVersion;
+        const selectedId = this.selected?.id;
         this.loading = true;
         this.error = '';
         try {
-            this.notes = await firstValueFrom(this.http.get<Note[]>('/api/notes'));
-            if (!this.selected && this.notes.length) this.select(this.notes[0]);
+            const page = await firstValueFrom(this.http.get<NotePage>('/api/notes', {
+                params: {q: this.query.trim(), skip: reset ? 0 : this.notes.length, limit: this.pageSize}
+            }));
+            if (requestVersion !== this.requestVersion) return false;
+            if (reset) {
+                this.notes = page.items;
+                if (!selectedId && !this.editing && this.notes.length) this.applySelection(this.notes[0]);
+            } else {
+                const existing = new Set(this.notes.map(note => note.id));
+                this.notes = [...this.notes, ...page.items.filter(note => !existing.has(note.id))];
+            }
+            this.total = page.total;
+            return true;
         } catch {
-            this.error = 'Could not load your notes. Check the connection and try again.';
+            if (requestVersion === this.requestVersion) {
+                this.error = 'Could not load your notes. Check the connection and try again.';
+            }
+            return false;
         } finally {
-            this.loading = false;
+            if (requestVersion === this.requestVersion) this.loading = false;
         }
+    }
+
+    async loadMore() {
+        if (this.busy || this.loading || !this.hasMore) return;
+        await this.load(false);
+    }
+
+    private applySelection(note: Note) {
+        this.resetSharingState();
+        this.selected = note;
+        this.editing = false;
+        this.message = '';
+        this.newActionItem = this.blankActionItem();
+        void this.loadAttachmentPreviews(note);
+    }
+
+    private resetSharingState() {
+        this.sharingRequestVersion++;
+        this.sharingOpen = false;
+        this.shares = [];
+        this.sharingContacts = [];
+        this.shareEmail = '';
+        this.sharePermission = 'view';
+        this.previousPermission = 'view';
     }
 
     select(n: Note) {
         if (this.busy || (this.dirty && !window.confirm('Discard unsaved changes?'))) return;
-        this.selected = n;
-        this.editing = false;
-        this.confirmDelete = false;
-        this.message = '';
-        this.newActionItem = this.blankActionItem();
+        this.invalidateListResponse();
+        this.applySelection(n);
     }
 
     create() {
@@ -127,15 +361,17 @@ export class NotesWorkspace implements OnInit {
             return;
         }
         if (this.busy || (this.dirty && !window.confirm('Discard unsaved changes?'))) return;
+        this.invalidateListResponse();
+        this.clearAttachmentPreviews();
+        this.resetSharingState();
         this.selected = null;
         this.draft = this.blank();
         this.editing = true;
-        this.confirmDelete = false;
         this.error = '';
     }
 
     edit() {
-        if (this.selected) {
+        if (this.selected && this.canEdit) {
             this.draft = this.fields(this.selected);
             this.editing = true;
         }
@@ -143,52 +379,121 @@ export class NotesWorkspace implements OnInit {
 
     cancel() {
         if (this.dirty && !window.confirm('Discard unsaved changes?')) return;
-        this.editing = false;
-        if (!this.selected) this.selected = this.notes[0] || null;
+        if (!this.selected && this.notes[0]) {
+            this.applySelection(this.notes[0]);
+        } else {
+            this.editing = false;
+            this.resetSharingState();
+        }
     }
 
     async save() {
-        if (!this.draft.title.trim() || !this.draft.meeting_date || this.busy) return;
+        if (!this.draft.title.trim() || !this.draft.meeting_date || this.busy || (this.selected && !this.canEdit)) return;
+        this.cancelListWork();
+        let operationError = '';
         this.busy = true;
         this.error = '';
         try {
-            const n = await firstValueFrom(this.selected ? this.http.put<Note>('/api/notes/' + this.selected.id, this.draft) : this.http.post<Note>('/api/notes', this.draft));
-            this.notes = [n, ...this.notes.filter(x => x.id !== n.id)].sort((a, b) => b.meeting_date.localeCompare(a.meeting_date));
-            this.selected = n;
-            this.editing = false;
+            const payload = {
+                ...this.draft,
+                scheduled_at: localDateTimeToUtc(this.draft.scheduled_at)
+            };
+            const n = await firstValueFrom(this.selected ? this.http.put<Note>('/api/notes/' + this.selected.id, payload) : this.http.post<Note>('/api/notes', payload));
+            this.applySelection(n);
             this.message = 'All changes saved';
         } catch {
-            this.error = 'Your note could not be saved. Your draft is still here—please try again.';
+            operationError = 'Your note could not be saved. Your draft is still here—please try again.';
         } finally {
             this.busy = false;
         }
+        await this.load();
+        if (operationError) this.error = operationError;
     }
 
     async remove() {
-        if (!this.selected || this.busy) return;
+        if (!this.selected || !this.isOwner || this.busy) return;
+        const deletedNote = this.selected;
+        const noteId = this.selected.id;
+        const undoDeadline = Date.now() + 15_000;
+        this.cancelListWork();
+        let operationError = '';
         this.busy = true;
         try {
-            await firstValueFrom(this.http.delete('/api/notes/' + this.selected.id));
-            this.notes = this.notes.filter(n => n.id !== this.selected!.id);
-            this.selected = this.notes[0] || null;
-            this.confirmDelete = false;
-            this.message = 'Note deleted';
+            await firstValueFrom(this.http.delete('/api/notes/' + noteId));
         } catch {
-            this.error = 'Could not delete the note. Please try again.';
+            operationError = 'Could not delete the note. Please try again.';
         } finally {
             this.busy = false;
         }
+        if (!operationError) {
+            const wasVisible = this.notes.some(note => note.id === noteId);
+            this.notes = this.notes.filter(note => note.id !== noteId);
+            if (wasVisible) this.total = Math.max(0, this.total - 1);
+            if (this.notes.length) {
+                this.applySelection(this.notes[0]);
+            } else {
+                this.clearAttachmentPreviews();
+                this.resetSharingState();
+                this.selected = null;
+            }
+            this.message = 'Note deleted';
+            this.showUndo(deletedNote, undoDeadline);
+        }
+        await this.load();
+        if (operationError) this.error = operationError;
+    }
+
+    private showUndo(note: Note, deadline: number) {
+        this.dismissUndo();
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) return;
+        this.undoNote = note;
+        this.undoTimer = setTimeout(() => {
+            this.undoNote = null;
+            this.undoTimer = undefined;
+        }, remaining);
+    }
+
+    dismissUndo() {
+        if (this.undoTimer) clearTimeout(this.undoTimer);
+        this.undoTimer = undefined;
+        this.undoNote = null;
+    }
+
+    async undoDelete() {
+        if (!this.undoNote || this.busy) return;
+        const deletedNote = this.undoNote;
+        this.cancelListWork();
+        let operationError = '';
+        this.busy = true;
+        this.error = '';
+        try {
+            const restored = await firstValueFrom(
+                this.http.post<Note>(`/api/notes/${deletedNote.id}/undelete`, {})
+            );
+            this.applySelection(restored);
+            this.message = 'Meeting restored';
+        } catch {
+            operationError = 'The note could not be restored. The undo window may have expired.';
+        } finally {
+            this.busy = false;
+            this.dismissUndo();
+        }
+        await this.load();
+        if (operationError) this.error = operationError;
     }
 
     async upload(event: Event) {
         const input = event.target as HTMLInputElement;
         const file = input.files?.[0];
-        if (!file || !this.selected) return;
+        if (!file || !this.selected || !this.canEdit) return;
         if (file.size > 20 * 1024 * 1024) {
             this.error = 'Choose a file no larger than 20 MB.';
             input.value = '';
             return;
         }
+        this.cancelListWork();
+        let operationError = '';
         this.busy = true;
         this.error = '';
         const body = new FormData();
@@ -196,30 +501,38 @@ export class NotesWorkspace implements OnInit {
         try {
             const item = await firstValueFrom(this.http.post<Attachment>(`/api/notes/${this.selected.id}/attachments`, body));
             this.selected.attachments.push(item);
+            void this.loadAttachmentPreviews(this.selected);
             this.message = 'Attachment uploaded';
         } catch {
-            this.error = 'Upload failed. Please try again.';
+            operationError = 'Upload failed. Please try again.';
         } finally {
             this.busy = false;
             input.value = '';
         }
+        await this.restoreListAfterMutation(operationError);
     }
 
     async removeFile(a: Attachment) {
-        if (!this.selected || !window.confirm(`Remove ${a.filename}?`)) return;
+        if (!this.selected || !this.canEdit || !window.confirm(`Remove ${a.filename}?`)) return;
+        this.cancelListWork();
+        let operationError = '';
         this.busy = true;
         try {
             await firstValueFrom(this.http.delete(`/api/notes/${this.selected.id}/attachments/${a.id}`));
             this.selected.attachments = this.selected.attachments.filter(x => x.id !== a.id);
+            void this.loadAttachmentPreviews(this.selected);
         } catch {
-            this.error = 'Could not remove attachment.';
+            operationError = 'Could not remove attachment.';
         } finally {
             this.busy = false;
         }
+        await this.restoreListAfterMutation(operationError);
     }
 
     async addActionItem() {
-        if (!this.selected || !this.newActionItem.text.trim() || this.busy) return;
+        if (!this.selected || !this.canEdit || !this.newActionItem.text.trim() || this.busy) return;
+        this.cancelListWork();
+        let operationError = '';
         this.busy = true;
         this.error = '';
         const body = {
@@ -232,36 +545,93 @@ export class NotesWorkspace implements OnInit {
             this.selected.action_items.push(item);
             this.newActionItem = this.blankActionItem();
         } catch {
-            this.error = 'Could not add the action item. Please try again.';
+            operationError = 'Could not add the action item. Please try again.';
         } finally {
             this.busy = false;
         }
+        await this.restoreListAfterMutation(operationError);
     }
 
     async toggleActionItem(item: ActionItem) {
-        if (this.busy) return;
+        if (!this.canEdit || this.busy) return;
+        this.cancelListWork();
+        let operationError = '';
         this.busy = true;
         try {
             const updated = await firstValueFrom(this.http.patch<ActionItem>(`/api/action-items/${item.id}`, {done: !item.done}));
             item.done = updated.done;
         } catch {
-            this.error = 'Could not update the action item.';
+            operationError = 'Could not update the action item.';
         } finally {
             this.busy = false;
         }
+        await this.restoreListAfterMutation(operationError);
     }
 
     async removeActionItem(item: ActionItem) {
-        if (!this.selected || this.busy) return;
+        if (!this.selected || !this.canEdit || this.busy) return;
+        this.cancelListWork();
+        let operationError = '';
         this.busy = true;
         try {
             await firstValueFrom(this.http.delete(`/api/action-items/${item.id}`));
             this.selected.action_items = this.selected.action_items.filter(x => x.id !== item.id);
         } catch {
-            this.error = 'Could not remove the action item.';
+            operationError = 'Could not remove the action item.';
         } finally {
             this.busy = false;
         }
+        await this.restoreListAfterMutation(operationError);
+    }
+
+    attachmentPreview(attachment: Attachment) {
+        return this.attachmentPreviews[attachment.id];
+    }
+
+    private previewKind(contentType: string): 'image' | 'pdf' | null {
+        if (['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(contentType)) return 'image';
+        return contentType === 'application/pdf' ? 'pdf' : null;
+    }
+
+    private async loadAttachmentPreviews(note: Note) {
+        this.clearAttachmentPreviews();
+        const version = this.previewVersion;
+        await Promise.all(note.attachments.map(async attachment => {
+            const kind = this.previewKind(attachment.content_type);
+            if (!kind) return;
+            try {
+                const blob = await firstValueFrom(this.http.get(
+                    `/api/notes/${note.id}/attachments/${attachment.id}`,
+                    {params: {inline: 'true'}, responseType: 'blob'}
+                ));
+                if (
+                    version !== this.previewVersion
+                    || this.selected?.id !== note.id
+                    || blob.type.toLowerCase() !== attachment.content_type
+                ) return;
+                const url = URL.createObjectURL(blob);
+                this.attachmentPreviews = {
+                    ...this.attachmentPreviews,
+                    [attachment.id]: {
+                        kind,
+                        url,
+                        resourceUrl: kind === 'pdf'
+                            ? this.sanitizer.bypassSecurityTrustResourceUrl(url)
+                            : undefined
+                    }
+                };
+            } catch {
+                // A failed or download-only response keeps the normal download action available.
+            }
+        }));
+    }
+
+    private clearAttachmentPreviews() {
+        this.previewVersion++;
+        for (const preview of Object.values(this.attachmentPreviews)) {
+            URL.revokeObjectURL(preview.url);
+        }
+        this.attachmentPreviews = {};
     }
 }
 

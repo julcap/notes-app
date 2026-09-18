@@ -1,3 +1,4 @@
+import logging
 import os
 import secrets
 import smtplib
@@ -7,9 +8,13 @@ from email.message import EmailMessage
 import boto3
 
 from ..database import now
+from ..observability import log_event
 from .config import APP_URL, SECURE
 from .models import EmailToken
 from .security import digest
+
+
+logger = logging.getLogger(__name__)
 
 
 def send_email(recipient, subject, body):
@@ -23,7 +28,14 @@ def send_email(recipient, subject, body):
         with smtplib.SMTP(os.getenv('SMTP_HOST', 'mailpit'), int(os.getenv('SMTP_PORT', '1025')), timeout=10) as smtp:
             smtp.send_message(message)
     else:
-        boto3.client('ses', region_name=os.getenv('AWS_REGION', 'eu-west-1')).send_email(Source=os.environ['SES_FROM_EMAIL'], Destination={'ToAddresses': [recipient]}, Message={'Subject': {'Data': subject}, 'Body': {'Text': {'Data': body}}})
+        boto3.client('ses', region_name=os.getenv('AWS_REGION', 'eu-west-1')).send_email(
+            Source=os.environ['SES_FROM_EMAIL'],
+            Destination={'ToAddresses': [recipient]},
+            Message={
+                'Subject': {'Data': subject, 'Charset': 'UTF-8'},
+                'Body': {'Text': {'Data': body, 'Charset': 'UTF-8'}},
+            },
+        )
 
 
 def deliver_email(recipient, subject, body):
@@ -31,8 +43,7 @@ def deliver_email(recipient, subject, body):
     try:
         send_email(recipient, subject, body)
     except Exception:
-        import logging
-        logging.getLogger(__name__).error('Transactional email delivery failed; check SES/SMTP configuration. Use resend or request recovery again.')
+        log_event(logger, logging.ERROR, 'transactional_email_delivery_failed')
 
 
 SUBJECTS = {'reset': 'Reset your Minutes password', 'verify': 'Verify your Minutes email', 'change_email': 'Confirm your new Minutes email'}

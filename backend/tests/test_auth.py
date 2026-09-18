@@ -1,10 +1,16 @@
 from datetime import timedelta
+from pathlib import Path
+
+import pytest
 import pyotp
 from fastapi import BackgroundTasks
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 from app import auth
 from app.database import SessionLocal, now
+from app.jobs import purge_deleted
 from app.notes.models import Note
+from app.storage import STORAGE
 from conftest import register, signed_in, token
 
 NOTE={'title':'Private','content':'Secret roadmap','meeting_date':'2026-09-17'}
@@ -45,8 +51,8 @@ def test_private_notes_and_attachments(client):
     base='/api/notes/'+n['id']
     a=client.post(base+'/attachments',files={'file':('x.txt',b'private')}).json()
     signed_in(client,'other@example.com')
-    assert client.get('/api/notes').json()==[]
-    assert client.get('/api/notes?q=roadmap').json()==[]
+    assert client.get('/api/notes').json()=={'items': [], 'total': 0}
+    assert client.get('/api/notes?q=roadmap').json()=={'items': [], 'total': 0}
     for method,path,kw in [('get',base,{}),('put',base,{'json':NOTE}),('delete',base,{}),('get',base+'/attachments/'+a['id'],{}),('delete',base+'/attachments/'+a['id'],{}),('post',base+'/attachments',{'files':{'file':('x',b'x')}})]:
         assert getattr(client,method)(path,**kw).status_code==404
     client.headers.pop('Authorization')
@@ -201,9 +207,41 @@ def test_change_password(client):
     assert client.post('/api/auth/change-password',json=good,headers=csrf(client)).status_code==200
     assert client.post('/api/auth/login',json={'email':'test@example.com','password':'NewPassword123'}).status_code==200
 
+
+def test_notification_preferences_default_opt_out_and_validate_lead(client):
+    assert client.get('/api/auth/notification-preferences').json() == {
+        'reminders_enabled': False,
+        'digest_enabled': False,
+        'reminder_lead_minutes': 10,
+    }
+
+    response = client.put(
+        '/api/auth/notification-preferences',
+        json={
+            'reminders_enabled': True,
+            'digest_enabled': True,
+            'reminder_lead_minutes': 45,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()['reminder_lead_minutes'] == 45
+    assert client.get('/api/auth/notification-preferences').json() == response.json()
+    for invalid in (0, 1441):
+        assert client.put(
+            '/api/auth/notification-preferences',
+            json={
+                'reminders_enabled': True,
+                'digest_enabled': False,
+                'reminder_lead_minutes': invalid,
+            },
+        ).status_code == 422
+
 def test_delete_account_cascades_notes_and_attachments(client):
     n=client.post('/api/notes',json=NOTE).json()
-    client.post('/api/notes/'+n['id']+'/attachments',files={'file':('x.txt',b'bye')})
+    attachment=client.post('/api/notes/'+n['id']+'/attachments',files={'file':('x.txt',b'bye')}).json()
+    assert client.delete('/api/notes/'+n['id']).status_code==204
+    assert (STORAGE / attachment['id']).exists()
     assert client.request('DELETE','/api/auth/me',json={'password':'wrong'},headers=csrf(client)).status_code==401
     r=client.request('DELETE','/api/auth/me',json={'password':'SafePassword123'},headers=csrf(client))
     assert r.status_code==200,r.text
@@ -212,3 +250,53 @@ def test_delete_account_cascades_notes_and_attachments(client):
     with SessionLocal() as db:
         assert db.scalar(select(auth.User))is None
         assert db.scalar(select(Note))is None
+    assert not (STORAGE / attachment['id']).exists()
+
+
+def test_delete_account_restores_files_when_database_commit_fails(client, monkeypatch):
+    n=client.post('/api/notes',json=NOTE).json()
+    attachment=client.post('/api/notes/'+n['id']+'/attachments',files={'file':('x.txt',b'bye')}).json()
+    attachment_path=STORAGE / attachment['id']
+    trash_path=STORAGE / '.trash' / attachment['id']
+    original_commit=Session.commit
+
+    def fail_commit(session):
+        raise RuntimeError('temporary database failure')
+
+    monkeypatch.setattr(Session,'commit',fail_commit)
+    with pytest.raises(RuntimeError,match='temporary database failure'):
+        client.request('DELETE','/api/auth/me',json={'password':'SafePassword123'},headers=csrf(client))
+    with SessionLocal() as db:
+        assert db.scalar(select(auth.User))is not None
+        assert db.scalar(select(Note))is not None
+    assert attachment_path.read_bytes()==b'bye'
+    assert not trash_path.exists()
+
+    monkeypatch.setattr(Session,'commit',original_commit)
+    assert client.request('DELETE','/api/auth/me',json={'password':'SafePassword123'},headers=csrf(client)).status_code==200
+    assert not attachment_path.exists()
+
+
+def test_delete_account_queues_failed_final_file_removal(client, monkeypatch):
+    n=client.post('/api/notes',json=NOTE).json()
+    attachment=client.post('/api/notes/'+n['id']+'/attachments',files={'file':('x.txt',b'bye')}).json()
+    attachment_path=STORAGE / attachment['id']
+    trash_path=STORAGE / '.trash' / attachment['id']
+    original_unlink=Path.unlink
+
+    def fail_trash_cleanup(path, *, missing_ok=False):
+        if path == trash_path:
+            raise PermissionError('temporary cleanup failure')
+        return original_unlink(path, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path,'unlink',fail_trash_cleanup)
+    assert client.request('DELETE','/api/auth/me',json={'password':'SafePassword123'},headers=csrf(client)).status_code==200
+    with SessionLocal() as db:
+        assert db.scalar(select(auth.User))is None
+        assert db.scalar(select(Note))is None
+    assert not attachment_path.exists()
+    assert trash_path.read_bytes()==b'bye'
+
+    monkeypatch.setattr(Path,'unlink',original_unlink)
+    assert purge_deleted()==0
+    assert not trash_path.exists()

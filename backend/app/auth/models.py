@@ -1,4 +1,4 @@
-from sqlalchemy import String, DateTime, ForeignKey, Index, UniqueConstraint, text
+from sqlalchemy import Boolean, CheckConstraint, Integer, String, DateTime, ForeignKey, Index, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..database import Base, now
@@ -16,9 +16,18 @@ class User(Base):
     token_version: Mapped[int] = mapped_column(default=0)
     totp_secret: Mapped[str | None] = mapped_column(String(200))
     totp_enabled: Mapped[bool] = mapped_column(default=False)
+    reminders_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    digest_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    reminder_lead_minutes: Mapped[int] = mapped_column(Integer, default=10)
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), default=now)
     updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
-    __table_args__ = (Index('unique_local_email', 'email', unique=True, postgresql_where=text("auth_provider = 'local'")),)
+    __table_args__ = (
+        Index('unique_local_email', 'email', unique=True, postgresql_where=text("auth_provider = 'local'")),
+        CheckConstraint(
+            'reminder_lead_minutes BETWEEN 1 AND 1440',
+            name='ck_users_reminder_lead_minutes',
+        ),
+    )
 
 
 class Identity(Base):
@@ -55,7 +64,7 @@ class RateBucket(Base):
     __tablename__ = 'auth_rate_limits'
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
     hits: Mapped[int] = mapped_column(default=0)
-    expires_at: Mapped[object] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[object] = mapped_column(DateTime(timezone=True), index=True)
 
 
 class BackupCode(Base):

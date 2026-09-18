@@ -28,9 +28,15 @@ services:
       FACEBOOK_CLIENT_SECRET: ${FACEBOOK_CLIENT_SECRET:-}
       AMAZON_CLIENT_ID: ${AMAZON_CLIENT_ID:-}
       AMAZON_CLIENT_SECRET: ${AMAZON_CLIENT_SECRET:-}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-local}
+      SENTRY_RELEASE: ${SENTRY_RELEASE:-}
+      METRICS_ENABLED: ${METRICS_ENABLED:-false}
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
+      TRUSTED_PROXY_IPS: ${TRUSTED_PROXY_IPS:-}
     volumes:
       - uploads:/data/uploads
-    command: ["sh", "-c", "python -m app.init_db && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --no-access-log"]
+    command: ["sh", "-c", "python -m app.init_db && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --no-access-log --no-proxy-headers"]
     depends_on:
       database:
         condition: service_healthy
@@ -40,6 +46,10 @@ services:
       - "127.0.0.1:8025:8025"
   frontend:
     build: ./frontend
+    environment:
+      FRONTEND_SENTRY_DSN: ${FRONTEND_SENTRY_DSN:-}
+      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-local}
+      SENTRY_RELEASE: ${SENTRY_RELEASE:-}
     ports:
       - "127.0.0.1:8080:8080"
     depends_on:

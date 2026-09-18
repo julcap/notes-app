@@ -15,14 +15,14 @@ Each item below is its own spec file in `03 Feature Roadmap/`, sized to be picke
 Roughly cheapest-and-most-impactful first, action items excepted since it's already shipped. Not a commitment, just a starting point for triage — pick whichever is actually most valuable next.
 
 1. ✅ [Action items](./03%20Feature%20Roadmap/01%20-%20done%20-%20Action%20items.md) — shipped 2026-09-17. New `action_items` table, checklist UI under notes, lightweight PATCH to toggle done. (The other half of the original "richer notes" section — see item 2.)
-2. ⬜ [Rich text notes: formatting](./03%20Feature%20Roadmap/02%20Rich%20text%20notes%20formatting.md) — markdown support and rendering for the `content` field.
-3. ⬜ [Full-text search](./03%20Feature%20Roadmap/03%20Full-text%20search.md) — Postgres `tsvector`/GIN, backend-only.
-4. ⬜ [Pagination](./03%20Feature%20Roadmap/04%20Pagination.md) — `skip`/`limit` through to the UI, small API shape change.
-5. ⬜ [Soft delete & undo](./03%20Feature%20Roadmap/05%20Soft%20delete%20and%20undo.md) — `deleted_at`, undo toast, scheduled purge.
-6. ⬜ [Attachment previews](./03%20Feature%20Roadmap/06%20Attachment%20previews.md) — inline preview for images/PDFs.
-7. ⬜ [Export](./03%20Feature%20Roadmap/07%20Export.md) — single meeting as PDF or markdown.
-8. ⬜ [Notifications & reminders](./03%20Feature%20Roadmap/08%20Notifications%20and%20reminders.md) — needs the email infra from the auth spec, and a scheduler this app doesn't have yet.
-9. ⬜ [Sharing & collaboration](./03%20Feature%20Roadmap/09%20Sharing%20and%20collaboration.md) — the biggest lift, reshapes authorization across every note endpoint, so it's last.
+2. ✅ [Rich text notes: formatting](./03%20Feature%20Roadmap/02%20-%20done%20-%20Rich%20text%20notes%20formatting.md) — safe markdown toolbar, preview, and read rendering shipped 2026-09-17.
+3. ✅ [Full-text search](./03%20Feature%20Roadmap/03%20-%20done%20-%20Full-text%20search.md) — weighted Postgres `tsvector`/GIN search shipped 2026-09-17; backend-only.
+4. ✅ [Pagination](./03%20Feature%20Roadmap/04%20-%20done%20-%20Pagination.md) — server totals, validated `skip`/`limit`, debounced backend search, and append-only **Load more** shipped 2026-09-17.
+5. ✅ [Soft delete & undo](./03%20Feature%20Roadmap/05%20-%20done%20-%20Soft%20delete%20and%20undo.md) — 15-second owner-only undo, hidden deleted parents, and a retry-safe 30-day purge job shipped 2026-09-17.
+6. ✅ [Attachment previews](./03%20Feature%20Roadmap/06%20-%20done%20-%20Attachment%20previews.md) — authenticated, byte-signature-verified image/PDF previews shipped 2026-09-18; download remains available.
+7. ✅ [Export](./03%20Feature%20Roadmap/07%20-%20done%20-%20Export.md) — authorized single-note Markdown/PDF downloads with action items shipped 2026-09-18.
+8. ✅ [Notifications & reminders](./03%20Feature%20Roadmap/08%20-%20done%20-%20Notifications%20and%20reminders.md) — opt-in scheduled reminders, Monday digests, persistent delivery keys, and PostgreSQL-locked CronJobs shipped 2026-09-18; production SES/job activation remains operator-controlled.
+9. ✅ [Sharing & collaboration](./03%20Feature%20Roadmap/09%20-%20done%20-%20Sharing%20and%20collaboration.md) — owner-managed verified-recipient sharing with view/edit permissions, previous-recipient confirmation, shared search/list results, and permission-aware UI shipped 2026-09-18.
 
 ## Working with this folder
 

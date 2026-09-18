@@ -1,5 +1,6 @@
 from logging.config import fileConfig
 import os
+import time
 
 from alembic import context
 from sqlalchemy import engine_from_config, pool, text
@@ -7,6 +8,7 @@ from sqlalchemy import engine_from_config, pool, text
 from app.database import Base
 from app.auth import models as auth_models  # noqa: F401
 from app.notes import models as notes_models  # noqa: F401
+from app.notifications import models as notification_models  # noqa: F401
 
 
 config = context.config
@@ -34,11 +36,22 @@ def run_migrations_online():
         prefix='sqlalchemy.',
         poolclass=pool.NullPool,
     )
-    with connectable.begin() as connection:
-        connection.execute(text('SELECT pg_advisory_xact_lock(71938421)'))
-        context.configure(connection=connection, target_metadata=target_metadata)
-        with context.begin_transaction():
-            context.run_migrations()
+    with connectable.connect() as connection:
+        while not connection.execute(text('SELECT pg_try_advisory_lock(71938421)')).scalar_one():
+            connection.commit()
+            time.sleep(0.05)
+        connection.commit()
+        try:
+            context.configure(
+                connection=connection,
+                target_metadata=target_metadata,
+                transaction_per_migration=True,
+            )
+            with context.begin_transaction():
+                context.run_migrations()
+        finally:
+            connection.execute(text('SELECT pg_advisory_unlock(71938421)'))
+            connection.commit()
 
 
 if context.is_offline_mode():

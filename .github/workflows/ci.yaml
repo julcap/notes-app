@@ -2,18 +2,36 @@ name: Test, build, and deploy
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, feat/prd-completion]
+  workflow_dispatch:
+    inputs:
+      promotion_sha:
+        description: Exact main commit SHA already deployed successfully to staging
+        required: true
+        type: string
 permissions:
   contents: read
 concurrency:
-  group: minutes-${{ github.ref }}
+  group: minutes-${{ github.workflow }}-${{ github.ref }}-${{ inputs.promotion_sha || github.sha }}
   cancel-in-progress: false
 jobs:
   test:
+    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: azure/setup-kubectl@776406bce94f63e41d621b960d78ee25c8b76ede # v4
+      - name: Validate deployment policy and rendered manifests
+        run: |
+          python -m pip install PyYAML==6.0.2
+          python -m unittest tests/test_deployment_policy.py -v
+      - name: Validate monitoring alerts
+        run: |
+          docker run --rm --entrypoint /bin/promtool -v "$PWD/monitoring:/monitoring:ro" prom/prometheus:v3.14.0 check rules /monitoring/alerts.yml
+          docker run --rm --entrypoint /bin/promtool -v "$PWD/monitoring:/monitoring:ro" prom/prometheus:v3.14.0 test rules /monitoring/alerts.test.yml
+          docker run --rm -v "$PWD/monitoring:/monitoring:ro" prom/blackbox-exporter:v0.28.0 --config.file=/monitoring/blackbox.yml --config.check
+          docker run --rm --entrypoint /bin/amtool -v "$PWD/monitoring:/monitoring:ro" prom/alertmanager:v0.34.1 check-config /monitoring/alertmanager.yml
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
           cache: npm
@@ -27,50 +45,288 @@ jobs:
       - run: docker compose -f compose.test.yaml up --build --abort-on-container-exit --exit-code-from tests
       - if: always()
         run: docker compose -f compose.test.yaml down -v
-  deploy:
-    if: github.event_name == 'push' && vars.DEPLOY_ENABLED == 'true'
+
+  build-images:
+    name: Build both application images without deployment
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/feat/prd-completion')
     needs: test
     runs-on: ubuntu-latest
-    environment: production
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: backend
+          push: false
+          tags: minutes-backend:${{ github.sha }}
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: frontend
+          push: false
+          tags: minutes-frontend:${{ github.sha }}
+
+  deploy-staging:
+    name: Deploy staging
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.STAGING_DEPLOY_ENABLED == 'true'
+    needs: test
+    runs-on: ubuntu-latest
+    environment: staging
+    concurrency:
+      group: minutes-staging
+      cancel-in-progress: false
     permissions:
       contents: read
       id-token: write
     env:
+      DEPLOY_ENVIRONMENT: staging
+      KUBE_NAMESPACE: minutes-staging
+      DEPLOY_ENABLED: ${{ vars.DEPLOY_ENABLED }}
       AWS_REGION: ${{ vars.AWS_REGION }}
+      AWS_DEPLOY_ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
       EKS_CLUSTER: ${{ vars.EKS_CLUSTER }}
       APP_DOMAIN: ${{ vars.APP_DOMAIN }}
       SES_FROM_EMAIL: ${{ vars.SES_FROM_EMAIL }}
       SES_ROLE_ARN: ${{ vars.SES_ROLE_ARN }}
       ACM_CERTIFICATE_ARN: ${{ vars.ACM_CERTIFICATE_ARN }}
+      STORAGE_BACKEND: ${{ vars.STORAGE_BACKEND }}
+      S3_BUCKET: ${{ vars.S3_BUCKET }}
+      S3_PREFIX: ${{ vars.S3_PREFIX }}
+      FRONTEND_SENTRY_DSN: ${{ vars.FRONTEND_SENTRY_DSN }}
+      METRICS_ENABLED: ${{ vars.METRICS_ENABLED || 'false' }}
+      TRUSTED_PROXY_IPS: ${{ vars.TRUSTED_PROXY_IPS }}
+      RATE_LIMIT_CLEANUP_SCHEDULE: ${{ vars.RATE_LIMIT_CLEANUP_SCHEDULE || '*/5 * * * *' }}
+      PURGE_SCHEDULE: ${{ vars.PURGE_SCHEDULE }}
+      REMINDER_SCHEDULE: ${{ vars.REMINDER_SCHEDULE }}
+      DIGEST_SCHEDULE: ${{ vars.DIGEST_SCHEDULE }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Validate required staging configuration
+        run: |
+          for name in DEPLOY_ENABLED AWS_REGION AWS_DEPLOY_ROLE_ARN EKS_CLUSTER APP_DOMAIN SES_FROM_EMAIL SES_ROLE_ARN ACM_CERTIFICATE_ARN STORAGE_BACKEND PURGE_SCHEDULE REMINDER_SCHEDULE DIGEST_SCHEDULE; do
+            test -n "${!name:-}" || { echo "Missing required staging variable: $name" >&2; exit 1; }
+          done
+          test "$DEPLOY_ENABLED" = true || { echo 'staging DEPLOY_ENABLED must be true' >&2; exit 1; }
+          if [ "$STORAGE_BACKEND" = s3 ]; then
+            test -n "$S3_BUCKET" && test -n "$S3_PREFIX" || { echo 'S3_BUCKET and S3_PREFIX are required for S3 storage' >&2; exit 1; }
+          elif [ "$STORAGE_BACKEND" != local ]; then
+            echo 'STORAGE_BACKEND must be local or s3' >&2
+            exit 1
+          fi
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
-      - uses: aws-actions/amazon-ecr-login@v2
+      - name: Require immutable ECR repositories
+        run: |
+          for repository in minutes-backend minutes-frontend; do
+            test "$(aws ecr describe-repositories --repository-names "$repository" --query 'repositories[0].imageTagMutability' --output text)" = IMMUTABLE || {
+              echo "ECR repository must reject tag replacement: $repository" >&2
+              exit 1
+            }
+          done
+      - uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2
         id: ecr
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/build-push-action@v6
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        id: backend
         with:
           context: backend
           push: true
           tags: ${{ steps.ecr.outputs.registry }}/minutes-backend:${{ github.sha }}
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        id: frontend
         with:
           context: frontend
           push: true
           tags: ${{ steps.ecr.outputs.registry }}/minutes-frontend:${{ github.sha }}
-      - uses: azure/setup-kubectl@v4
-      - name: Deploy immutable images
+      - uses: azure/setup-kubectl@776406bce94f63e41d621b960d78ee25c8b76ede # v4
+      - name: Run migration and deploy immutable staging images
         env:
-          BACKEND_IMAGE: ${{ steps.ecr.outputs.registry }}/minutes-backend:${{ github.sha }}
-          FRONTEND_IMAGE: ${{ steps.ecr.outputs.registry }}/minutes-frontend:${{ github.sha }}
+          BACKEND_IMAGE: ${{ steps.ecr.outputs.registry }}/minutes-backend@${{ steps.backend.outputs.digest }}
+          FRONTEND_IMAGE: ${{ steps.ecr.outputs.registry }}/minutes-frontend@${{ steps.frontend.outputs.digest }}
+          IMAGE_SHA: ${{ github.sha }}
         run: |
+          set -euo pipefail
           aws eks update-kubeconfig --name "$EKS_CLUSTER" --region "$AWS_REGION"
-          kubectl apply -f deploy/namespace.yaml
-          envsubst < deploy/service-account.yaml | kubectl apply -f -
-          envsubst < deploy/app.yaml | kubectl apply -f -
-          envsubst < deploy/ingress.yaml | kubectl apply -f -
-          kubectl -n minutes rollout status deployment/backend --timeout=180s
-          kubectl -n minutes rollout status deployment/frontend --timeout=180s
+          RENDER_DIR="$(mktemp -d)"
+          trap 'rm -rf "$RENDER_DIR"' EXIT
+          bash deploy/render.sh "$RENDER_DIR"
+          kubectl apply --dry-run=client -f "$RENDER_DIR"
+          kubectl apply -f "$RENDER_DIR/namespace.yaml"
+          kubectl -n "$KUBE_NAMESPACE" get secret "${KUBE_NAMESPACE}-secrets"
+          kubectl -n "$KUBE_NAMESPACE" get secret "${KUBE_NAMESPACE}-oauth"
+          kubectl apply -f "$RENDER_DIR/service-account.yaml"
+          MIGRATION_JOB_NAME="database-migrations-${IMAGE_SHA:0:12}"
+          kubectl -n "$KUBE_NAMESPACE" delete job "$MIGRATION_JOB_NAME" --ignore-not-found=true
+          kubectl apply -f "$RENDER_DIR/migration-job.yaml"
+          kubectl -n "$KUBE_NAMESPACE" wait --for=condition=complete "job/$MIGRATION_JOB_NAME" --timeout=300s
+          kubectl apply -f "$RENDER_DIR/app.yaml"
+          kubectl apply -f "$RENDER_DIR/ingress.yaml"
+          kubectl -n "$KUBE_NAMESPACE" rollout status deployment/backend --timeout=180s
+          kubectl -n "$KUBE_NAMESPACE" rollout status deployment/frontend --timeout=180s
+      - name: Record successfully staged image digests
+        env:
+          STAGED_BACKEND_IMAGE: ${{ steps.ecr.outputs.registry }}/minutes-backend@${{ steps.backend.outputs.digest }}
+          STAGED_FRONTEND_IMAGE: ${{ steps.ecr.outputs.registry }}/minutes-frontend@${{ steps.frontend.outputs.digest }}
+          STAGED_SHA: ${{ github.sha }}
+        run: |
+          jq -n --arg sha "$STAGED_SHA" --arg backend "$STAGED_BACKEND_IMAGE" --arg frontend "$STAGED_FRONTEND_IMAGE" '{sha: $sha, backend: $backend, frontend: $frontend}' > staging-images.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: staging-images-${{ github.sha }}
+          path: staging-images.json
+          if-no-files-found: error
+          retention-days: 30
+
+  validate-production-promotion:
+    name: Validate staged production promotion SHA
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      promotion_sha: ${{ steps.validate.outputs.promotion_sha }}
+      staging_run_id: ${{ steps.validate.outputs.staging_run_id }}
+    steps:
+      - name: Require exact SHA from a successful main staging deployment
+        id: validate
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          PROMOTION_SHA_INPUT: ${{ inputs.promotion_sha }}
+        with:
+          script: |
+            const promotionSha = process.env.PROMOTION_SHA_INPUT;
+            if (!/^[0-9a-f]{40}$/.test(promotionSha)) {
+              core.setFailed('promotion_sha must be an exact lowercase 40-character commit SHA');
+              return;
+            }
+            const runs = await github.paginate(github.rest.actions.listWorkflowRunsForWorkflow, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'ci.yaml',
+              branch: 'main',
+              event: 'push',
+              status: 'success',
+              per_page: 100
+            });
+            const candidates = runs.filter(run => run.head_sha === promotionSha);
+            let stagedRunId = null;
+            for (const run of candidates) {
+              const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                run_id: run.id,
+                per_page: 100
+              });
+              if (jobs.some(job => job.name === 'Deploy staging' && job.conclusion === 'success')) {
+                stagedRunId = run.id;
+                break;
+              }
+            }
+            if (stagedRunId === null) {
+              core.setFailed(`No successful staging deployment on main exists for ${promotionSha}`);
+              return;
+            }
+            core.setOutput('promotion_sha', promotionSha);
+            core.setOutput('staging_run_id', String(stagedRunId));
+
+  deploy-production:
+    name: Deploy production
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    needs: [validate-production-promotion]
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: minutes-production
+      cancel-in-progress: false
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    env:
+      DEPLOY_ENVIRONMENT: production
+      KUBE_NAMESPACE: minutes-production
+      DEPLOY_ENABLED: ${{ vars.DEPLOY_ENABLED }}
+      PROMOTION_SHA: ${{ needs.validate-production-promotion.outputs.promotion_sha }}
+      STAGING_RUN_ID: ${{ needs.validate-production-promotion.outputs.staging_run_id }}
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      AWS_DEPLOY_ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+      EKS_CLUSTER: ${{ vars.EKS_CLUSTER }}
+      APP_DOMAIN: ${{ vars.APP_DOMAIN }}
+      SES_FROM_EMAIL: ${{ vars.SES_FROM_EMAIL }}
+      SES_ROLE_ARN: ${{ vars.SES_ROLE_ARN }}
+      ACM_CERTIFICATE_ARN: ${{ vars.ACM_CERTIFICATE_ARN }}
+      STORAGE_BACKEND: ${{ vars.STORAGE_BACKEND }}
+      S3_BUCKET: ${{ vars.S3_BUCKET }}
+      S3_PREFIX: ${{ vars.S3_PREFIX }}
+      FRONTEND_SENTRY_DSN: ${{ vars.FRONTEND_SENTRY_DSN }}
+      METRICS_ENABLED: ${{ vars.METRICS_ENABLED || 'false' }}
+      TRUSTED_PROXY_IPS: ${{ vars.TRUSTED_PROXY_IPS }}
+      RATE_LIMIT_CLEANUP_SCHEDULE: ${{ vars.RATE_LIMIT_CLEANUP_SCHEDULE || '*/5 * * * *' }}
+      PURGE_SCHEDULE: ${{ vars.PURGE_SCHEDULE }}
+      REMINDER_SCHEDULE: ${{ vars.REMINDER_SCHEDULE }}
+      DIGEST_SCHEDULE: ${{ vars.DIGEST_SCHEDULE }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.PROMOTION_SHA }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: staging-images-${{ env.PROMOTION_SHA }}
+          path: promotion
+          github-token: ${{ github.token }}
+          run-id: ${{ env.STAGING_RUN_ID }}
+      - name: Validate required production configuration
+        run: |
+          for name in PROMOTION_SHA STAGING_RUN_ID DEPLOY_ENABLED AWS_REGION AWS_DEPLOY_ROLE_ARN EKS_CLUSTER APP_DOMAIN SES_FROM_EMAIL SES_ROLE_ARN ACM_CERTIFICATE_ARN STORAGE_BACKEND PURGE_SCHEDULE REMINDER_SCHEDULE DIGEST_SCHEDULE; do
+            test -n "${!name:-}" || { echo "Missing required production variable: $name" >&2; exit 1; }
+          done
+          test "$DEPLOY_ENABLED" = true || { echo 'production DEPLOY_ENABLED must be true' >&2; exit 1; }
+          if [ "$STORAGE_BACKEND" = s3 ]; then
+            test -n "$S3_BUCKET" && test -n "$S3_PREFIX" || { echo 'S3_BUCKET and S3_PREFIX are required for S3 storage' >&2; exit 1; }
+          elif [ "$STORAGE_BACKEND" != local ]; then
+            echo 'STORAGE_BACKEND must be local or s3' >&2
+            exit 1
+          fi
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: Validate exact staged image provenance
+        id: images
+        run: |
+          set -euo pipefail
+          staged_sha="$(jq -er '.sha' promotion/staging-images.json)"
+          backend_image="$(jq -er '.backend' promotion/staging-images.json)"
+          frontend_image="$(jq -er '.frontend' promotion/staging-images.json)"
+          test "$staged_sha" = "$PROMOTION_SHA"
+          [[ "$backend_image" =~ ^[^[:space:]]+/minutes-backend@sha256:[0-9a-f]{64}$ ]]
+          [[ "$frontend_image" =~ ^[^[:space:]]+/minutes-frontend@sha256:[0-9a-f]{64}$ ]]
+          echo "backend=$backend_image" >> "$GITHUB_OUTPUT"
+          echo "frontend=$frontend_image" >> "$GITHUB_OUTPUT"
+      - uses: azure/setup-kubectl@776406bce94f63e41d621b960d78ee25c8b76ede # v4
+      - name: Run migration and promote immutable images to production
+        env:
+          BACKEND_IMAGE: ${{ steps.images.outputs.backend }}
+          FRONTEND_IMAGE: ${{ steps.images.outputs.frontend }}
+          IMAGE_SHA: ${{ env.PROMOTION_SHA }}
+        run: |
+          set -euo pipefail
+          aws eks update-kubeconfig --name "$EKS_CLUSTER" --region "$AWS_REGION"
+          RENDER_DIR="$(mktemp -d)"
+          trap 'rm -rf "$RENDER_DIR"' EXIT
+          bash deploy/render.sh "$RENDER_DIR"
+          kubectl apply --dry-run=client -f "$RENDER_DIR"
+          kubectl apply -f "$RENDER_DIR/namespace.yaml"
+          kubectl -n "$KUBE_NAMESPACE" get secret "${KUBE_NAMESPACE}-secrets"
+          kubectl -n "$KUBE_NAMESPACE" get secret "${KUBE_NAMESPACE}-oauth"
+          kubectl apply -f "$RENDER_DIR/service-account.yaml"
+          MIGRATION_JOB_NAME="database-migrations-${IMAGE_SHA:0:12}"
+          kubectl -n "$KUBE_NAMESPACE" delete job "$MIGRATION_JOB_NAME" --ignore-not-found=true
+          kubectl apply -f "$RENDER_DIR/migration-job.yaml"
+          kubectl -n "$KUBE_NAMESPACE" wait --for=condition=complete "job/$MIGRATION_JOB_NAME" --timeout=300s
+          kubectl apply -f "$RENDER_DIR/app.yaml"
+          kubectl apply -f "$RENDER_DIR/ingress.yaml"
+          kubectl -n "$KUBE_NAMESPACE" rollout status deployment/backend --timeout=180s
+          kubectl -n "$KUBE_NAMESPACE" rollout status deployment/frontend --timeout=180s
