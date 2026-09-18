@@ -5,6 +5,8 @@ alembic==1.16.5
 psycopg[binary]==3.3.3
 python-multipart==0.0.22
 pytest==9.0.2
+pypdf==6.19.0
+reportlab==5.0.1
 httpx==0.28.1
 bcrypt==4.3.0
 PyJWT==2.10.1

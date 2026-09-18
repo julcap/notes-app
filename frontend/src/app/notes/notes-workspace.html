@@ -84,6 +84,10 @@
                     <ng-container *ngIf="selected as n; else welcome">
                         <div class="editor-toolbar"><span class="pill">MEETING NOTE</span>
                             <div>
+                                <button class="text-btn" data-export-format="md" (click)="exportNote('md')"
+                                        [disabled]="busy">Export Markdown</button>
+                                <button class="text-btn" data-export-format="pdf" (click)="exportNote('pdf')"
+                                        [disabled]="busy">Export PDF</button>
                                 <button class="text-btn danger" (click)="remove()" [disabled]="busy">Delete
                                 </button>
                                 <button class="secondary" (click)="edit()" [disabled]="busy">✎ &nbsp; Edit note</button>

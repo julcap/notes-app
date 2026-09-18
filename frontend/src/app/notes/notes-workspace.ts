@@ -81,6 +81,27 @@ export class NotesWorkspace implements OnInit, OnDestroy {
         }
     }
 
+    async exportNote(format: 'md' | 'pdf') {
+        if (!this.selected) return;
+        try {
+            const response = await firstValueFrom(this.http.get(
+                `/api/notes/${this.selected.id}/export`,
+                {params: {format}, observe: 'response', responseType: 'blob'}
+            ));
+            const disposition = response.headers.get('Content-Disposition') || '';
+            const filename = /^attachment; filename="([A-Za-z0-9._-]+)"$/.exec(disposition)?.[1]
+                || `meeting-note.${format}`;
+            const url = URL.createObjectURL(response.body!);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = filename;
+            link.click();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+        } catch {
+            this.error = `Could not export the note as ${format === 'pdf' ? 'PDF' : 'Markdown'}. Please try again.`;
+        }
+    }
+
     blank() {
         const d = new Date();
         return {

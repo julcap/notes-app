@@ -2,7 +2,15 @@
 
 2026-09-17 · split from `03 Feature Roadmap (Post-MVP).md`
 
-**Status:** Not started.
+**Status:** Code complete (2026-09-18); deployment pending operator-controlled release.
+
+## Shipped behavior
+
+- `GET /api/notes/{note_id}/export?format=md|pdf` requires authentication, applies the existing active-owner check, and rejects missing or unsupported formats with `422`.
+- Both formats include title, meeting date, attendees, note content, and every action item's status, owner, and due date. Downloads use sanitized ASCII filenames and `Cache-Control: no-store`.
+- Markdown is returned as UTF-8 `text/markdown`. PDF is rendered directly with ReportLab Platypus, bundled licensed DejaVu Sans, and bundled Noto fallbacks for CJK and emoji; user text is escaped and no markup, URL, attachment, or local-file content is interpreted or fetched.
+- The Angular detail view offers separate Markdown and PDF actions through the authenticated HTTP client, uses the server-provided filename, and downloads through a short-lived object URL.
+- Automated coverage parses multipage PDF output from a 100,000-character note, verifies Unicode and action-item extraction, exact Markdown fields, filename sanitization, format validation, owner/deleted-note isolation, literal hostile markup, and browser download behavior.
 
 ## Problem
 
@@ -17,7 +25,7 @@ There's no way to get a meeting out of the app once it's in.
 
 - New endpoint: `GET /api/notes/{note_id}/export?format=pdf|md`, owner-checked via the existing `get_note()` helper in `backend/app/notes/routes.py`.
 - Markdown export: straightforward template — title, date, attendees, content, then a `- [ ]`/`- [x]` list of action items (from `Note.action_items`, already available via the `action_items` relationship added in [01 - done - Action items](./01%20-%20done%20-%20Action%20items.md)).
-- PDF export: needs a rendering step server-side (e.g. render the same markdown/HTML template and convert with a library such as WeasyPrint, or render via a headless browser) — pick whichever has the lightest footprint to add to the backend's dependencies, since this app currently has no PDF-generation dependency at all.
+- PDF export uses direct ReportLab Platypus rendering with escaped text, DejaVu Sans as the primary font, and bundled Noto fallbacks; it does not invoke a browser or HTML-to-PDF service.
 - Response should be a `FileResponse`/streamed download with an appropriate filename (e.g. `{note.title}.md` / `.pdf`) and content-type, following the pattern already used in `download()` for attachments.
 
 ## Frontend

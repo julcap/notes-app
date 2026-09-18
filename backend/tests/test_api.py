@@ -1,5 +1,6 @@
 import os
 import tempfile
+from io import BytesIO
 from datetime import datetime, timezone
 os.environ['UPLOAD_DIR'] = tempfile.mkdtemp()
 from fastapi.testclient import TestClient
@@ -379,3 +380,89 @@ def test_action_items_crud_and_ownership(client):
     assert client.delete('/api/notes/'+n['id']).status_code == 204
     assert client.patch('/api/action-items/'+item['id'], json={'done':False}).status_code == 404
     assert client.delete('/api/action-items/'+other_item['id']).status_code == 204
+
+
+def test_markdown_export_includes_exact_note_fields_and_action_items(raw):
+    owner = signed_in(raw)
+    n = note(
+        raw,
+        title='Quarterly planning',
+        content='First line\n\n**Decision:** ship it.',
+        attendees='Alex, 李',
+    )
+    raw.post(
+        f"/api/notes/{n['id']}/action-items",
+        json={'text': 'Send recap', 'owner_name': 'Zoë', 'due_date': '2026-09-20'},
+    )
+    completed = raw.post(
+        f"/api/notes/{n['id']}/action-items",
+        json={'text': 'Close loop'},
+    ).json()
+    raw.patch(f"/api/action-items/{completed['id']}", json={'done': True})
+
+    response = raw.get(f"/api/notes/{n['id']}/export", params={'format': 'md'})
+
+    assert response.status_code == 200
+    assert response.headers['content-type'] == 'text/markdown; charset=utf-8'
+    assert response.headers['cache-control'] == 'no-store'
+    assert response.headers['x-content-type-options'] == 'nosniff'
+    assert response.headers['content-disposition'] == 'attachment; filename="Quarterly-planning.md"'
+    assert response.text == (
+        '# Quarterly planning\n\n'
+        '**Date:** 2026-09-17\n\n'
+        '**Attendees:** Alex, 李\n\n'
+        '## Notes\n\n'
+        'First line\n\n**Decision:** ship it.\n\n'
+        '## Action items\n\n'
+        '- [ ] Send recap — Owner: Zoë — Due: 2026-09-20\n'
+        '- [x] Close loop — Owner: Unassigned — Due: No due date\n'
+    )
+
+    unsafe = note(raw, title='../../季度\r\nplan\\file')
+    unsafe_response = raw.get(f"/api/notes/{unsafe['id']}/export", params={'format': 'md'})
+    disposition = unsafe_response.headers['content-disposition']
+    assert disposition == 'attachment; filename="plan-file.md"'
+    assert '\r' not in disposition and '\n' not in disposition and '/' not in disposition and '\\' not in disposition
+
+    assert raw.get(f"/api/notes/{n['id']}/export").status_code == 422
+    assert raw.get(f"/api/notes/{n['id']}/export", params={'format': 'html'}).status_code == 422
+
+    signed_in(raw, 'other@example.com')
+    assert raw.get(f"/api/notes/{n['id']}/export", params={'format': 'md'}).status_code == 404
+    raw.headers['Authorization'] = 'Bearer ' + owner['access_token']
+    assert raw.delete(f"/api/notes/{n['id']}").status_code == 204
+    assert raw.get(f"/api/notes/{n['id']}/export", params={'format': 'md'}).status_code == 404
+
+
+def test_pdf_export_is_paginated_unicode_text_without_markup_interpretation(client):
+    from pypdf import PdfReader
+
+    prefix = '<img src="file:///etc/passwd"> https://example.com/track '
+    content = (prefix + ('Long Unicode café Δοκιμή 漢字 😀. ' * 6000))[:100000]
+    n = note(client, title='Résumé Δοκιμή 漢字 😀', content=content, attendees='Zoë, Δανάη, 李 😀')
+    item = client.post(
+        f"/api/notes/{n['id']}/action-items",
+        json={'text': 'Verify café Δοκιμή 漢字 😀', 'owner_name': 'Renée', 'due_date': '2026-09-21'},
+    ).json()
+    client.patch(f"/api/action-items/{item['id']}", json={'done': True})
+
+    response = client.get(f"/api/notes/{n['id']}/export", params={'format': 'pdf'})
+
+    assert response.status_code == 200
+    assert response.headers['content-type'] == 'application/pdf'
+    assert response.headers['cache-control'] == 'no-store'
+    assert response.headers['x-content-type-options'] == 'nosniff'
+    assert response.headers['content-disposition'] == 'attachment; filename="Resume.pdf"'
+    reader = PdfReader(BytesIO(response.content))
+    extracted = '\n'.join(page.extract_text() or '' for page in reader.pages)
+    assert len(reader.pages) > 1
+    assert 'Résumé Δοκιμή 漢字 😀' in extracted
+    assert 'Zoë, Δανάη, 李 😀' in extracted
+    assert 'Long Unicode café Δοκιμή 漢字 😀.' in extracted
+    assert 'Verify café Δοκιμή 漢字 😀' in extracted
+    assert 'Completed' in extracted
+    assert 'Renée' in extracted
+    assert '2026-09-21' in extracted
+    assert '<img src="file:///etc/passwd">' in extracted
+    assert 'https://example.com/track' in extracted
+    assert 'root:x:' not in extracted

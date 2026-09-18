@@ -375,6 +375,50 @@ describe('NotesWorkspace', () => {
         expect(revokeObjectUrl).toHaveBeenCalledWith('blob:application/pdf');
     });
 
+    it('downloads authenticated Markdown and PDF exports with server-provided filenames', fakeAsync(() => {
+        const createObjectUrl = spyOn(URL, 'createObjectURL').and.returnValues('blob:markdown', 'blob:pdf');
+        const revokeObjectUrl = spyOn(URL, 'revokeObjectURL');
+        const downloads: string[] = [];
+        spyOn(HTMLAnchorElement.prototype, 'click').and.callFake(function (this: HTMLAnchorElement) {
+            downloads.push(this.download);
+        });
+        fixture.detectChanges();
+        http.expectOne(request => request.url === '/api/notes').flush({items: [note], total: 1});
+        flushMicrotasks();
+        fixture.detectChanges();
+
+        const buttons = Array.from(
+            fixture.nativeElement.querySelectorAll('[data-export-format]') as NodeListOf<HTMLButtonElement>
+        );
+        expect(buttons.map(button => button.textContent?.trim())).toEqual(['Export Markdown', 'Export PDF']);
+
+        buttons[0].click();
+        const markdown = http.expectOne(request =>
+            request.url === '/api/notes/note-1/export' && request.params.get('format') === 'md'
+        );
+        expect(markdown.request.responseType).toBe('blob');
+        markdown.flush(new Blob(['# Planning'], {type: 'text/markdown'}), {
+            headers: {'Content-Disposition': 'attachment; filename="Planning.md"'}
+        });
+        flushMicrotasks();
+
+        buttons[1].click();
+        const pdf = http.expectOne(request =>
+            request.url === '/api/notes/note-1/export' && request.params.get('format') === 'pdf'
+        );
+        expect(pdf.request.responseType).toBe('blob');
+        pdf.flush(new Blob(['pdf'], {type: 'application/pdf'}), {
+            headers: {'Content-Disposition': 'attachment; filename="Planning.pdf"'}
+        });
+        flushMicrotasks();
+
+        expect(downloads).toEqual(['Planning.md', 'Planning.pdf']);
+        expect(createObjectUrl).toHaveBeenCalledTimes(2);
+        tick(1000);
+        expect(revokeObjectUrl).toHaveBeenCalledWith('blob:markdown');
+        expect(revokeObjectUrl).toHaveBeenCalledWith('blob:pdf');
+    }));
+
     it('updates a valid meeting note and preserves the draft after an HTTP error', async () => {
         component.selected = note;
         component.editing = true;

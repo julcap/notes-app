@@ -1,9 +1,10 @@
 import uuid
 from datetime import timedelta
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from sqlalchemy import func, literal_column, select, text
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Session, selectinload
@@ -13,6 +14,7 @@ from ..database import db, now
 from ..jobs import try_reconcile_quarantine
 from ..storage import FILE_CLEANUP_LOCK_ID, MAX_FILE_SIZE, STORAGE, discard_quarantined, quarantine_files
 from .attachments import BINARY_CONTENT_TYPE, stored_content_type, verified_inline_content_type
+from .export import export_filename, markdown_export, pdf_export
 from .models import ActionItem, Attachment, Note
 from .schemas import ActionItemInput, ActionItemOut, ActionItemPatch, AttachmentOut, NoteInput, NoteOut, NotePage
 
@@ -75,6 +77,37 @@ def create_note(payload: NoteInput, session: Session = Depends(db), user: User =
 @router.get('/{note_id}', response_model=NoteOut)
 def read_note(note_id: str, session: Session = Depends(db), user: User = Depends(current_user)):
     return get_note(session, note_id, user)
+
+
+@router.get('/{note_id}/export')
+def export_note(
+    note_id: str,
+    format: Literal['md', 'pdf'],
+    session: Session = Depends(db),
+    user: User = Depends(current_user),
+):
+    note = get_note(session, note_id, user)
+    if format == 'pdf':
+        filename = export_filename(note.title, 'pdf')
+        return Response(
+            pdf_export(note),
+            media_type='application/pdf',
+            headers={
+                'Content-Disposition': f'attachment; filename="{filename}"',
+                'Cache-Control': 'no-store',
+                'X-Content-Type-Options': 'nosniff',
+            },
+        )
+    filename = export_filename(note.title, 'md')
+    return Response(
+        markdown_export(note).encode(),
+        media_type='text/markdown',
+        headers={
+            'Content-Disposition': f'attachment; filename="{filename}"',
+            'Cache-Control': 'no-store',
+            'X-Content-Type-Options': 'nosniff',
+        },
+    )
 
 
 @router.put('/{note_id}', response_model=NoteOut)
