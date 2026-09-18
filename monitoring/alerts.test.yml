@@ -1,0 +1,125 @@
+rule_files:
+  - alerts.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: sustained high 5xx rate fires after five minutes
+    interval: 1m
+    input_series:
+      - series: 'http_requests_total{job="minutes-backend",method="GET",route="/api/notes",status="200"}'
+        values: '0+10x10'
+      - series: 'http_requests_total{job="minutes-backend",method="GET",route="/api/notes",status="500"}'
+        values: '0+1x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: MinutesHigh5xxRate
+        exp_alerts: []
+      - eval_time: 7m
+        alertname: MinutesHigh5xxRate
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: Minutes API error rate is above 5%
+              description: At least 20 requests occurred in five minutes and more than 5% returned 5xx for five minutes.
+              runbook_url: https://github.com/julcap/notes-app/blob/main/monitoring/README.md#error-rate-alert
+
+  - name: low traffic and exactly five percent do not fire
+    interval: 1m
+    input_series:
+      - series: 'http_requests_total{job="minutes-backend",method="GET",route="/api/notes",status="200"}'
+        values: '0+1x10'
+      - series: 'http_requests_total{job="minutes-backend",method="GET",route="/api/notes",status="500"}'
+        values: '0+1x10'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: MinutesHigh5xxRate
+        exp_alerts: []
+    promql_expr_test:
+      - expr: 'sum(increase(http_requests_total{job="minutes-backend"}[5m]))'
+        eval_time: 10m
+        exp_samples:
+          - labels: '{}'
+            value: 10
+
+  - name: normal traffic does not fire
+    interval: 1m
+    input_series:
+      - series: 'http_requests_total{job="minutes-backend",method="GET",route="/api/notes",status="200"}'
+        values: '0+19x10'
+      - series: 'http_requests_total{job="minutes-backend",method="GET",route="/api/notes",status="500"}'
+        values: '0+1x10'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: MinutesHigh5xxRate
+        exp_alerts: []
+
+  - name: recovered error rate clears
+    interval: 1m
+    input_series:
+      - series: 'http_requests_total{job="minutes-backend",method="GET",route="/api/notes",status="200"}'
+        values: '0+10x16'
+      - series: 'http_requests_total{job="minutes-backend",method="GET",route="/api/notes",status="500"}'
+        values: '0+1x10 10+0x6'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: MinutesHigh5xxRate
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: Minutes API error rate is above 5%
+              description: At least 20 requests occurred in five minutes and more than 5% returned 5xx for five minutes.
+              runbook_url: https://github.com/julcap/notes-app/blob/main/monitoring/README.md#error-rate-alert
+      - eval_time: 16m
+        alertname: MinutesHigh5xxRate
+        exp_alerts: []
+
+  - name: synthetic health failure fires and recovers independently
+    interval: 1m
+    input_series:
+      - series: 'probe_success{job="minutes-health",instance="https://minutes.internal/api/health"}'
+        values: '1 1 0 0 0 1'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: MinutesHealthProbeFailed
+        exp_alerts: []
+      - eval_time: 4m
+        alertname: MinutesHealthProbeFailed
+        exp_alerts:
+          - exp_labels:
+              instance: https://minutes.internal/api/health
+              job: minutes-health
+              severity: critical
+            exp_annotations:
+              summary: Minutes API health probe is failing
+              description: The external HTTP probe of /api/health has failed for two minutes; this verifies application and database health from the probe location.
+              runbook_url: https://github.com/julcap/notes-app/blob/main/monitoring/README.md#health-probe-alert
+      - eval_time: 5m
+        alertname: MinutesHealthProbeFailed
+        exp_alerts: []
+
+  - name: backend scrape target down fires and recovers independently
+    interval: 1m
+    input_series:
+      - series: 'up{job="minutes-backend",instance="backend.minutes.svc.cluster.local:8000"}'
+        values: '1 1 0 0 0 1'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: MinutesBackendScrapeDown
+        exp_alerts: []
+      - eval_time: 4m
+        alertname: MinutesBackendScrapeDown
+        exp_alerts:
+          - exp_labels:
+              instance: backend.minutes.svc.cluster.local:8000
+              job: minutes-backend
+              severity: critical
+            exp_annotations:
+              summary: Prometheus cannot scrape the Minutes backend
+              description: The private metrics target has been down for two minutes; this is scrape reachability, not an HTTP dependency-health check.
+              runbook_url: https://github.com/julcap/notes-app/blob/main/monitoring/README.md#scrape-target-down-alert
+      - eval_time: 5m
+        alertname: MinutesBackendScrapeDown
+        exp_alerts: []

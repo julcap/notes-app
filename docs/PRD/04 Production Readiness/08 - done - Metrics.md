@@ -21,4 +21,4 @@ To enable a deployment, an operator must first store a non-empty `metrics-token`
 
 ## Not covered by this file
 
-Installing or operating Prometheus, creating dashboards, selecting alert thresholds, and delivering alerts to a human remain environment/operator work. Alert rules are tracked separately in [09 Alerting](./09%20Alerting.md).
+Installing or operating Prometheus, creating dashboards, and delivering alerts to a human remain environment/operator work. Tested thresholds and receiver templates are code-complete in [09 - done - Alerting](./09%20-%20done%20-%20Alerting.md), but live activation and confirmed receipt remain operator-gated.

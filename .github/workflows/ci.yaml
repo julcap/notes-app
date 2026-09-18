@@ -13,6 +13,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Validate monitoring alerts
+        run: |
+          docker run --rm --entrypoint /bin/promtool -v "$PWD/monitoring:/monitoring:ro" prom/prometheus:v3.14.0 check rules /monitoring/alerts.yml
+          docker run --rm --entrypoint /bin/promtool -v "$PWD/monitoring:/monitoring:ro" prom/prometheus:v3.14.0 test rules /monitoring/alerts.test.yml
+          docker run --rm -v "$PWD/monitoring:/monitoring:ro" prom/blackbox-exporter:v0.28.0 --config.file=/monitoring/blackbox.yml --config.check
+          docker run --rm --entrypoint /bin/amtool -v "$PWD/monitoring:/monitoring:ro" prom/alertmanager:v0.34.1 check-config /monitoring/alertmanager.yml
       - uses: actions/setup-node@v4
         with:
           node-version: 24

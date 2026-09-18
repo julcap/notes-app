@@ -75,6 +75,7 @@ Browser → Angular served by Nginx → `/api` reverse proxy → FastAPI → Pos
 - `backend/app/observability.py`: allowlisted JSON logging, request-ID context/middleware, safe unhandled-error stacks, and identifier-free auth audit events.
 - `backend/app/error_tracking.py`: opt-in FastAPI Sentry initialization and complete event/breadcrumb allowlisting.
 - `backend/app/metrics.py`: opt-in bounded Prometheus counters/histograms and bearer-protected private exposition.
+- `monitoring/`: opt-in Prometheus scrape/rule templates, deterministic alert tests, Blackbox Exporter probe configuration, Alertmanager receiver template, and drill runbook.
 - `backend/app/database.py`: SQLAlchemy engine, session factory, declarative base.
 - `backend/app/storage.py`: local and S3-compatible attachment backends, deterministic object keys, and retryable quarantine/restore helpers used by routes, purge, and account deletion.
 - `backend/app/storage_migrate.py`: dry-run-by-default, SHA-256-verified local-to-S3 attachment migration CLI with a JSON-lines retry manifest.
@@ -110,7 +111,13 @@ For local opt-in testing, set those variables in `.env`; leaving either DSN empt
 
 Request metrics are disabled unless `METRICS_ENABLED=true`. When enabled, the backend records `http_requests_total` and `http_request_duration_seconds` with only bounded `method`, FastAPI route template, and `status` labels; extension methods collapse to `OTHER`, unmatched routes collapse to `/unmatched`, and health/scrape traffic is excluded. `GET /metrics` requires a non-empty `METRICS_TOKEN` as a bearer token. The public Nginx frontend returns 404 for `/metrics`, and the ingress routes only to that frontend, so an approved scraper must use the private `backend` ClusterIP service.
 
-Run one Uvicorn worker per pod and sum the same labeled series across backend pods in Prometheus. This repository does not configure Python multiprocess metrics. For production, create or update the optional `minutes-observability` Secret with a `metrics-token` key before setting the protected GitHub environment variable `METRICS_ENABLED=true`; leaving the flag false is the secure default. Installing Prometheus, configuring the scraper, selecting alerts, and verifying delivery are separate operator gates.
+Run one Uvicorn worker per pod and sum the same labeled series across backend pods in Prometheus. This repository does not configure Python multiprocess metrics. For production, create or update the optional `minutes-observability` Secret with a `metrics-token` key before setting the protected GitHub environment variable `METRICS_ENABLED=true`; leaving the flag false is the secure default. Installing the monitoring services and verifying delivery remain separate operator gates.
+
+## Alerting
+
+`monitoring/` provides disabled-by-default deployment templates for Prometheus, Blackbox Exporter, and Alertmanager. The rules page on a sustained 5xx ratio above 5% only when at least 20 requests occurred in five minutes, a real HTTP `/api/health` probe failure lasting two minutes, and private backend scrape failure lasting two minutes. The health probe and Prometheus `up` signal are deliberately separate: `probe_success` covers the external HTTP path and database-aware health response, while `up` only covers the metrics scrape path.
+
+Alertmanager reads the human webhook URL from an out-of-band secret file, groups and repeats at 30-minute intervals, and sends resolved notifications. No receiver, provider, or monitoring deployment is activated by the application manifests. Follow [the monitoring activation and drill runbook](monitoring/README.md), validate with `promtool` and `amtool`, and complete an approved staging firing/recovery drill before claiming operational readiness. Repository tests prove rule logic and local delivery only; a real human receipt remains an external gate.
 
 ## EKS deployment
 
