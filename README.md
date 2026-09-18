@@ -69,9 +69,11 @@ Browser → Angular served by Nginx → `/api` reverse proxy → FastAPI → Pos
 - `frontend/src/app/account/`: `account.ts`/`.html` — the signed-in Account page (profile, password, 2FA enrollment/disable, delete account).
 - `frontend/src/app/shell/`: `nav-rail.ts`/`.html` — the sidebar navigation shared by the notes workspace and the Account page.
 - `frontend/src/app/notes/`: `notes-workspace.ts`/`.html` (the meeting-notes UI) and `note.model.ts`.
+- `frontend/src/app/error-tracking.ts`: opt-in Angular error capture, runtime public configuration, and payload/breadcrumb allowlisting.
 - `frontend/src/styles.css`: shared responsive styling.
 - `backend/app/main.py`: FastAPI app wiring (middleware, routers, health check).
 - `backend/app/observability.py`: allowlisted JSON logging, request-ID context/middleware, safe unhandled-error stacks, and identifier-free auth audit events.
+- `backend/app/error_tracking.py`: opt-in FastAPI Sentry initialization and complete event/breadcrumb allowlisting.
 - `backend/app/database.py`: SQLAlchemy engine, session factory, declarative base.
 - `backend/app/storage.py`: local and S3-compatible attachment backends, deterministic object keys, and retryable quarantine/restore helpers used by routes, purge, and account deletion.
 - `backend/app/storage_migrate.py`: dry-run-by-default, SHA-256-verified local-to-S3 attachment migration CLI with a JSON-lines retry manifest.
@@ -97,6 +99,12 @@ Local deployment remains one backend replica with the ReadWriteOnce PVC. After a
 kubectl kustomize deploy-s3 | envsubst | kubectl apply -f -
 ```
 
+## Error tracking
+
+Error tracking is disabled unless a DSN is explicitly configured. The backend reads the private `SENTRY_DSN`; the frontend reads the separate public `FRONTEND_SENTRY_DSN` at container startup through `/runtime-config.js`, so rebuilding the Angular bundle is unnecessary and no backend secret enters it. Both sides accept `SENTRY_ENVIRONMENT` and `SENTRY_RELEASE`. Tracing, profiling, replay, log forwarding, and default PII collection remain disabled. Allowlist hooks retain the exception type, scrubbed stack, release/environment, and safe request ID while dropping request URLs, query strings, fragments, headers, cookies, bodies, users, email/IP values, raw note identifiers/content, exception messages, breadcrumb messages, and breadcrumb data.
+
+For local opt-in testing, set those variables in `.env`; leaving either DSN empty guarantees that side never initializes its SDK. Production backend configuration uses the optional `sentry-dsn` key in a `minutes-observability` Kubernetes Secret. `FRONTEND_SENTRY_DSN` is a public GitHub environment variable. Do not add a debug crash route or real credentials to source control. A release is code-complete without live ingestion: an operator must separately approve configuration and verify one scrubbed event in the provider before claiming production monitoring is active.
+
 ## EKS deployment
 
 Infrastructure prerequisites:
@@ -113,6 +121,8 @@ Create the namespace and provision a Kubernetes Secret named `minutes-secrets` c
 kubectl apply -f deploy/namespace.yaml
 kubectl -n minutes create secret generic minutes-secrets --from-file=database-url=/secure/path/database-url --from-file=auth-secret=/secure/path/auth-secret
 ```
+
+When backend error tracking is approved, create `minutes-observability` out of band with a `sentry-dsn` key. The manifest treats this Secret and key as optional, so an unconfigured deployment remains disabled rather than failing startup.
 
 The file should contain the complete PostgreSQL connection URL with no trailing newline; URL-encode password characters. For manual deployment, export `BACKEND_IMAGE`, `FRONTEND_IMAGE`, `APP_DOMAIN`, `ACM_CERTIFICATE_ARN`, `AWS_REGION`, `SES_FROM_EMAIL`, and `SES_ROLE_ARN`, then:
 
@@ -142,6 +152,7 @@ Push this directory as the repository root. Pull requests and pushes to `main` r
 | `ACM_CERTIFICATE_ARN` | ALB TLS certificate |
 | `SES_FROM_EMAIL` | SES verified sender |
 | `SES_ROLE_ARN` | EKS service account IAM role permitting SES send |
+| `FRONTEND_SENTRY_DSN` | Optional public browser DSN; empty disables frontend error tracking |
 
 Create the `production` GitHub environment and configure its access rules. Images are tagged with the commit SHA. The workflow builds and pushes both images, applies manifests, and waits for rollouts. Infrastructure, DNS, and secrets must already exist; the workflow does not provision the Kubernetes cluster.
 

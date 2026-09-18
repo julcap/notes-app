@@ -20,9 +20,9 @@ Product depth: what's missing for this to feel like a product, not a demo. Actio
 
 → `03 Feature Roadmap/`
 
-## 4. [Production Readiness Gaps](./04%20Production%20Readiness%20Gaps.md) — 5/15 code-complete
+## 4. [Production Readiness Gaps](./04%20Production%20Readiness%20Gaps.md) — 9/15 code-complete
 
-The import audit corrected the baseline to 4/15 completed items; frontend automated tests are the fifth code-complete item on `feat/prd-completion`. CI/CD, secrets management, health checks, backend tests, and frontend tests are implemented. Object storage, database migrations, observability (logging/error-tracking/metrics/alerting), a staging environment, app-wide rate limiting, session management UI, and the legal pages required for social login to leave test mode remain. Code completion does not imply that later provider or production activation gates have been cleared.
+CI/CD, secrets management, health checks, backend/frontend tests, database migrations, S3-compatible attachment storage, structured logging, and opt-in backend/frontend error tracking are code-complete. Metrics, alerting, a staging environment, app-wide rate limiting, session management UI, and the legal pages required for social login to leave test mode remain. S3 cutover, production log aggregation, and live scrubbed Sentry ingestion are separate operator gates; code completion does not imply those provider or production activation gates have been cleared.
 
 → `04 Production Readiness/`
 

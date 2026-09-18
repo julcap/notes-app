@@ -69,6 +69,8 @@ jobs:
           STORAGE_BACKEND: ${{ vars.STORAGE_BACKEND || 'local' }}
           S3_BUCKET: ${{ vars.S3_BUCKET }}
           S3_PREFIX: ${{ vars.S3_PREFIX }}
+          FRONTEND_SENTRY_DSN: ${{ vars.FRONTEND_SENTRY_DSN }}
+          SENTRY_RELEASE: ${{ github.sha }}
         run: |
           aws eks update-kubeconfig --name "$EKS_CLUSTER" --region "$AWS_REGION"
           kubectl apply -f deploy/namespace.yaml

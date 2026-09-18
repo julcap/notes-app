@@ -17,3 +17,4 @@ itsdangerous==2.2.0
 pyotp==2.9.0
 qrcode==8.0
 cryptography>=42,<46
+sentry-sdk[fastapi]==2.69.2

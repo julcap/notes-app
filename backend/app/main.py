@@ -8,6 +8,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from .auth import SECRET, SECURE
 from .auth import router as auth_router
 from .database import Base, db, engine
+from .error_tracking import initialize_error_tracking
 from .notes.routes import action_items_router
 from .notes.routes import router as notes_router
 from .observability import ObservedFastAPI
@@ -21,6 +22,7 @@ async def lifespan(app):
         storage.root.mkdir(parents=True, exist_ok=True)
     yield
 
+initialize_error_tracking()
 app = ObservedFastAPI(title='Minutes API', lifespan=lifespan)
 
 app.add_middleware(SessionMiddleware, secret_key=SECRET, https_only=SECURE, same_site='lax', max_age=600)

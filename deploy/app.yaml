@@ -71,6 +71,13 @@ spec:
               value: ${SES_FROM_EMAIL}
             - name: AWS_REGION
               value: ${AWS_REGION}
+            - name: SENTRY_DSN
+              valueFrom:
+                secretKeyRef: {name: minutes-observability, key: sentry-dsn, optional: true}
+            - name: SENTRY_ENVIRONMENT
+              value: production
+            - name: SENTRY_RELEASE
+              value: "${SENTRY_RELEASE}"
           envFrom:
             - secretRef:
                 name: minutes-oauth
@@ -254,6 +261,13 @@ spec:
         - name: frontend
           image: ${FRONTEND_IMAGE}
           ports: [{containerPort: 8080}]
+          env:
+            - name: FRONTEND_SENTRY_DSN
+              value: "${FRONTEND_SENTRY_DSN}"
+            - name: SENTRY_ENVIRONMENT
+              value: production
+            - name: SENTRY_RELEASE
+              value: "${SENTRY_RELEASE}"
           readinessProbe:
             httpGet: {path: /healthz, port: 8080}
           livenessProbe:

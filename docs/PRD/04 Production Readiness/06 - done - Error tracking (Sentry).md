@@ -1,0 +1,26 @@
+# Error tracking (Sentry)
+
+2026-09-17 · split from `04 Production Readiness Gaps.md`
+
+**Status: code-complete; live activation pending.** Backend FastAPI and frontend Angular exception capture are implemented and disabled unless their separate DSNs are explicitly configured. No live provider event was sent during implementation.
+
+## What shipped
+
+- `backend/app/error_tracking.py` initializes `sentry-sdk` with the FastAPI integration only when `SENTRY_DSN` is non-empty.
+- `frontend/src/app/error-tracking.ts` registers Sentry's Angular `ErrorHandler` only when the public runtime `FRONTEND_SENTRY_DSN` is valid and non-empty.
+- The frontend container writes `/runtime-config.js` at startup, so environment, release, and public browser DSN can change without rebuilding the Angular bundle. The backend DSN is never exposed to the frontend.
+- Both SDKs disable default PII, tracing, profiling, replay, and log forwarding.
+- Backend and frontend `beforeSend`/breadcrumb allowlists reconstruct the complete outgoing event. They retain exception type, scrubbed filename/function/line stack frames, release/environment, and a validated request ID where available. They drop request URLs, query strings, fragments, headers, cookies, bodies, users, email/IP values, raw note IDs/content, exception messages, breadcrumb messages/data, arbitrary contexts, and extras.
+- Backend initialization includes the FastAPI SDK integration. Frontend initialization uses the Angular SDK's `createErrorHandler` provider.
+- No permanent crash/debug endpoint exists. Tests use thrown exceptions, an in-memory backend transport, and fake frontend initialization callbacks.
+
+## Configuration
+
+- Backend: `SENTRY_DSN`, optionally `SENTRY_ENVIRONMENT` and `SENTRY_RELEASE`.
+- Frontend: separate public `FRONTEND_SENTRY_DSN`, optionally the same non-secret environment/release labels.
+- Empty DSNs are the default and perform no SDK initialization or telemetry network activity.
+- Kubernetes reads the backend DSN from the optional `minutes-observability/sentry-dsn` Secret. The frontend DSN is a public GitHub environment variable rendered into container runtime configuration.
+
+## Verification boundary
+
+Automated tests verify disabled behavior, configured exception capture with a stack, full-payload and breadcrumb sentinel redaction, Angular provider/runtime wiring, and absence of a crash endpoint. Production DSNs, provider projects, ingestion, alert delivery, retention, access control, and one real scrubbed-event inspection remain operator-controlled and unverified. Code completion does not mean production monitoring is active.
