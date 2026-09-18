@@ -71,9 +71,10 @@ Browser → Angular served by Nginx → `/api` reverse proxy → FastAPI → Pos
 - `frontend/src/app/notes/`: `notes-workspace.ts`/`.html` (the meeting-notes UI) and `note.model.ts`.
 - `frontend/src/app/error-tracking.ts`: opt-in Angular error capture, runtime public configuration, and payload/breadcrumb allowlisting.
 - `frontend/src/styles.css`: shared responsive styling.
-- `backend/app/main.py`: FastAPI app wiring (middleware, routers, health check).
+- `backend/app/main.py`: FastAPI app wiring (middleware, routers, health check, private metrics installation).
 - `backend/app/observability.py`: allowlisted JSON logging, request-ID context/middleware, safe unhandled-error stacks, and identifier-free auth audit events.
 - `backend/app/error_tracking.py`: opt-in FastAPI Sentry initialization and complete event/breadcrumb allowlisting.
+- `backend/app/metrics.py`: opt-in bounded Prometheus counters/histograms and bearer-protected private exposition.
 - `backend/app/database.py`: SQLAlchemy engine, session factory, declarative base.
 - `backend/app/storage.py`: local and S3-compatible attachment backends, deterministic object keys, and retryable quarantine/restore helpers used by routes, purge, and account deletion.
 - `backend/app/storage_migrate.py`: dry-run-by-default, SHA-256-verified local-to-S3 attachment migration CLI with a JSON-lines retry manifest.
@@ -104,6 +105,12 @@ kubectl kustomize deploy-s3 | envsubst | kubectl apply -f -
 Error tracking is disabled unless a DSN is explicitly configured. The backend reads the private `SENTRY_DSN`; the frontend reads the separate public `FRONTEND_SENTRY_DSN` at container startup through `/runtime-config.js`, so rebuilding the Angular bundle is unnecessary and no backend secret enters it. Both sides accept `SENTRY_ENVIRONMENT` and `SENTRY_RELEASE`. Tracing, profiling, replay, log forwarding, and default PII collection remain disabled. Allowlist hooks retain the exception type, scrubbed stack, release/environment, and safe request ID while dropping request URLs, query strings, fragments, headers, cookies, bodies, users, email/IP values, raw note identifiers/content, exception messages, breadcrumb messages, and breadcrumb data.
 
 For local opt-in testing, set those variables in `.env`; leaving either DSN empty guarantees that side never initializes its SDK. Production backend configuration uses the optional `sentry-dsn` key in a `minutes-observability` Kubernetes Secret. `FRONTEND_SENTRY_DSN` is a public GitHub environment variable. Do not add a debug crash route or real credentials to source control. A release is code-complete without live ingestion: an operator must separately approve configuration and verify one scrubbed event in the provider before claiming production monitoring is active.
+
+## Request metrics
+
+Request metrics are disabled unless `METRICS_ENABLED=true`. When enabled, the backend records `http_requests_total` and `http_request_duration_seconds` with only bounded `method`, FastAPI route template, and `status` labels; extension methods collapse to `OTHER`, unmatched routes collapse to `/unmatched`, and health/scrape traffic is excluded. `GET /metrics` requires a non-empty `METRICS_TOKEN` as a bearer token. The public Nginx frontend returns 404 for `/metrics`, and the ingress routes only to that frontend, so an approved scraper must use the private `backend` ClusterIP service.
+
+Run one Uvicorn worker per pod and sum the same labeled series across backend pods in Prometheus. This repository does not configure Python multiprocess metrics. For production, create or update the optional `minutes-observability` Secret with a `metrics-token` key before setting the protected GitHub environment variable `METRICS_ENABLED=true`; leaving the flag false is the secure default. Installing Prometheus, configuring the scraper, selecting alerts, and verifying delivery are separate operator gates.
 
 ## EKS deployment
 

@@ -78,6 +78,11 @@ spec:
               value: production
             - name: SENTRY_RELEASE
               value: "${SENTRY_RELEASE}"
+            - name: METRICS_ENABLED
+              value: "${METRICS_ENABLED}"
+            - name: METRICS_TOKEN
+              valueFrom:
+                secretKeyRef: {name: minutes-observability, key: metrics-token, optional: true}
           envFrom:
             - secretRef:
                 name: minutes-oauth

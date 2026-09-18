@@ -9,6 +9,7 @@ from .auth import SECRET, SECURE
 from .auth import router as auth_router
 from .database import Base, db, engine
 from .error_tracking import initialize_error_tracking
+from .metrics import install_metrics
 from .notes.routes import action_items_router
 from .notes.routes import router as notes_router
 from .observability import ObservedFastAPI
@@ -24,6 +25,7 @@ async def lifespan(app):
 
 initialize_error_tracking()
 app = ObservedFastAPI(title='Minutes API', lifespan=lifespan)
+install_metrics(app)
 
 app.add_middleware(SessionMiddleware, secret_key=SECRET, https_only=SECURE, same_site='lax', max_age=600)
 app.include_router(auth_router)

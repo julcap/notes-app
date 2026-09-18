@@ -71,6 +71,7 @@ jobs:
           S3_PREFIX: ${{ vars.S3_PREFIX }}
           FRONTEND_SENTRY_DSN: ${{ vars.FRONTEND_SENTRY_DSN }}
           SENTRY_RELEASE: ${{ github.sha }}
+          METRICS_ENABLED: ${{ vars.METRICS_ENABLED || 'false' }}
         run: |
           aws eks update-kubeconfig --name "$EKS_CLUSTER" --region "$AWS_REGION"
           kubectl apply -f deploy/namespace.yaml

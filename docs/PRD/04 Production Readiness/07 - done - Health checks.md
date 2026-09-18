@@ -14,4 +14,4 @@ The original doc noted `/api/health` "only checks that the process is up, not th
 
 ## Not covered by this file
 
-Request-level metrics (latency, error rate) and alerting on health-check failure are separate, unbuilt pieces — see [08 Metrics](./08%20Metrics.md) and [09 Alerting](./09%20Alerting.md). A failing health check today only affects Kubernetes routing; no human gets notified.
+Request-level metrics (latency and status counters) are now code-complete in [08 - done - Metrics](./08%20-%20done%20-%20Metrics.md), while alerting on health-check failure remains separate in [09 Alerting](./09%20Alerting.md). A failing health check today only affects Kubernetes routing; no human gets notified.
