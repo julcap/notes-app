@@ -8,15 +8,16 @@ from starlette.middleware.sessions import SessionMiddleware
 from .auth import SECRET, SECURE
 from .auth import router as auth_router
 from .database import Base, db, engine
-from .notes.routes import STORAGE
 from .notes.routes import action_items_router
 from .notes.routes import router as notes_router
+from .storage import STORAGE, LocalStorage, storage
 from .notes.sharing import notes_sharing_router, sharing_router
 
 
 @asynccontextmanager
 async def lifespan(app):
-    STORAGE.mkdir(parents=True, exist_ok=True)
+    if isinstance(storage, LocalStorage):
+        storage.root.mkdir(parents=True, exist_ok=True)
     yield
 
 app = FastAPI(title='Minutes API', lifespan=lifespan)

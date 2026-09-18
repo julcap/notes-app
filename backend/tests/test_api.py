@@ -6,6 +6,7 @@ os.environ['UPLOAD_DIR'] = tempfile.mkdtemp()
 from fastapi.testclient import TestClient
 from app.main import app, Base, engine, STORAGE
 from app.notes import routes as note_routes
+from app.notes.models import Attachment
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 import pytest
@@ -372,6 +373,47 @@ def test_attachment_delete_reconciles_files_after_database_commit_errors(client,
     assert refreshed_path.read_bytes() == b'refresh'
     assert not (STORAGE / '.trash' / refreshed['id']).exists()
     monkeypatch.setattr(Session, 'refresh', original_refresh)
+
+
+def test_attachment_upload_persists_object_key_and_streams_headers(client):
+    n = note(client)
+    response = client.post(
+        f"/api/notes/{n['id']}/attachments",
+        files={'file': ('stream.txt', b'streamed bytes', 'text/plain')},
+    )
+    assert response.status_code == 201
+    attachment = response.json()
+    with Session(engine) as session:
+        row = session.get(Attachment, attachment['id'])
+        assert row.object_key == attachment['id']
+
+    downloaded = client.get(f"/api/notes/{n['id']}/attachments/{attachment['id']}")
+    assert downloaded.status_code == 200
+    assert downloaded.content == b'streamed bytes'
+    assert downloaded.headers['content-length'] == str(len(b'streamed bytes'))
+    assert downloaded.headers['content-disposition'] == 'attachment; filename="stream.txt"'
+    assert downloaded.headers['cache-control'] == 'no-store'
+    assert downloaded.headers['x-content-type-options'] == 'nosniff'
+
+
+def test_attachment_content_disposition_encodes_unicode_and_controls(client):
+    n = note(client)
+    attachment = client.post(
+        f"/api/notes/{n['id']}/attachments",
+        files={'file': ('safe.txt', b'content', 'text/plain')},
+    ).json()
+    with Session(engine) as session:
+        row = session.get(Attachment, attachment['id'])
+        row.filename = 'résumé\r\nX-Evil: yes.txt'
+        session.commit()
+
+    downloaded = client.get(f"/api/notes/{n['id']}/attachments/{attachment['id']}")
+    disposition = downloaded.headers['content-disposition']
+    assert disposition == (
+        "attachment; filename*=utf-8''r%C3%A9sum%C3%A9%0D%0AX-Evil%3A%20yes.txt"
+    )
+    assert '\r' not in disposition and '\n' not in disposition
+
 
 def test_action_items_crud_and_ownership(client):
     n = note(client)

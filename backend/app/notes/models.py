@@ -47,6 +47,7 @@ class Attachment(Base):
     filename: Mapped[str] = mapped_column(String(255))
     size: Mapped[int]
     content_type: Mapped[str] = mapped_column(String(255), default='application/octet-stream')
+    object_key: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 

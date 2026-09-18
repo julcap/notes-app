@@ -7,35 +7,45 @@ from sqlalchemy.orm import selectinload
 
 from .database import SessionLocal
 from .notes.models import Attachment, Note
-from .storage import FILE_CLEANUP_LOCK_ID, STORAGE, discard_quarantined, quarantine_files
+from .storage import FILE_CLEANUP_LOCK_ID, LocalStorage, storage as configured_storage
 
 
 PURGE_RETENTION = timedelta(days=30)
 
 
-def reconcile_quarantine(session, storage: Path) -> None:
-    trash = storage / '.trash'
-    if not trash.is_dir():
+def storage_backend(value=None):
+    return LocalStorage(value) if isinstance(value, Path) else value or configured_storage
+
+
+def reconcile_quarantine(session, storage=None) -> None:
+    backend = storage_backend(storage)
+    quarantined = backend.quarantined()
+    if not quarantined:
         return
-    paths = [path for path in trash.iterdir() if path.is_file()]
-    if not paths:
-        return
-    existing = set(
-        session.scalars(
-            select(Attachment.id).where(Attachment.id.in_([path.name for path in paths]))
-        ).all()
-    )
-    for path in paths:
-        if path.name in existing:
-            target = storage / path.name
-            if target.exists():
-                raise RuntimeError(f'Attachment exists in storage and quarantine: {path.name}')
-            path.replace(target)
+    keys = [item.key for item in quarantined]
+    rows = session.execute(
+        select(Attachment.id, Attachment.object_key).where(
+            (Attachment.object_key.in_(keys)) | (Attachment.id.in_(keys))
+        )
+    ).all()
+    existing = {object_key or attachment_id for attachment_id, object_key in rows}
+    for item in quarantined:
+        if item.key in existing:
+            if backend.exists(item.key):
+                if backend.read(item.key) != backend.read(item.quarantine_key):
+                    raise RuntimeError(f'Attachment differs between storage and quarantine: {item.key}')
+                backend.discard([item])
+            else:
+                backend.restore([item])
         else:
-            path.unlink()
+            if backend.exists(item.key):
+                if backend.read(item.key) != backend.read(item.quarantine_key):
+                    raise RuntimeError(f'Orphan differs between storage and quarantine: {item.key}')
+                backend.delete(item.key)
+            backend.discard([item])
 
 
-def try_reconcile_quarantine(*, session_factory=SessionLocal, storage: Path = STORAGE) -> None:
+def try_reconcile_quarantine(*, session_factory=SessionLocal, storage=None) -> None:
     try:
         with session_factory() as session:
             session.execute(
@@ -50,9 +60,10 @@ def try_reconcile_quarantine(*, session_factory=SessionLocal, storage: Path = ST
 def purge_deleted(
     *,
     session_factory=SessionLocal,
-    storage: Path = STORAGE,
+    storage=None,
     current_time: datetime | None = None,
 ) -> int:
+    backend = storage_backend(storage)
     cutoff = (current_time or datetime.now(timezone.utc)) - PURGE_RETENTION
     purged = 0
     with session_factory() as session:
@@ -62,15 +73,19 @@ def purge_deleted(
         )
         if not locked:
             return 0
-        reconcile_quarantine(session, storage)
+        reconcile_quarantine(session, backend)
         notes = session.scalars(
             select(Note)
             .where(Note.deleted_at.is_not(None), Note.deleted_at < cutoff)
             .options(selectinload(Note.attachments))
             .order_by(Note.deleted_at, Note.id)
         ).all()
-        attachment_ids = [attachment.id for note in notes for attachment in note.attachments]
-        quarantined = quarantine_files(attachment_ids, storage)
+        object_keys = [
+            attachment.object_key or attachment.id
+            for note in notes
+            for attachment in note.attachments
+        ]
+        quarantined = backend.quarantine(object_keys)
         try:
             for note in notes:
                 session.delete(note)
@@ -78,9 +93,9 @@ def purge_deleted(
             session.commit()
         except Exception:
             session.rollback()
-            try_reconcile_quarantine(session_factory=session_factory, storage=storage)
+            try_reconcile_quarantine(session_factory=session_factory, storage=backend)
             raise
-        discard_quarantined(quarantined)
+        backend.discard(quarantined)
         return purged
 
 

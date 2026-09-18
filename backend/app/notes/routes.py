@@ -2,9 +2,10 @@ import uuid
 from datetime import timedelta
 from pathlib import Path
 from typing import Literal
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import Response, StreamingResponse
 from sqlalchemy import and_, func, literal_column, or_, select, text
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Session, selectinload
@@ -12,7 +13,7 @@ from sqlalchemy.orm import Session, selectinload
 from ..auth import User, current_user, verified_user
 from ..database import db, now
 from ..jobs import try_reconcile_quarantine
-from ..storage import FILE_CLEANUP_LOCK_ID, MAX_FILE_SIZE, STORAGE, discard_quarantined, quarantine_files
+from ..storage import FILE_CLEANUP_LOCK_ID, MAX_FILE_SIZE, FileTooLarge, ObjectNotFound, storage
 from .attachments import BINARY_CONTENT_TYPE, stored_content_type, verified_inline_content_type
 from .export import export_filename, markdown_export, pdf_export
 from .models import ActionItem, Attachment, MeetingShare, Note
@@ -152,15 +153,12 @@ def upload(note_id: str, file: UploadFile, session: Session = Depends(db), user:
     session.execute(text('SELECT pg_advisory_xact_lock(:lock_id)'), {'lock_id': FILE_CLEANUP_LOCK_ID})
     note = get_note(session, note_id, user, required='edit', lock=True)
     attachment_id = str(uuid.uuid4())
-    path = STORAGE / attachment_id
-    size = 0
+    object_key = storage.object_key(attachment_id)
     try:
-        with path.open('wb') as target:
-            while chunk := file.file.read(1024 * 1024):
-                size += len(chunk)
-                if size > MAX_FILE_SIZE:
-                    raise HTTPException(413, 'Files must be 20 MB or smaller')
-                target.write(chunk)
+        try:
+            size = storage.write(object_key, file.file, max_size=MAX_FILE_SIZE)
+        except FileTooLarge as error:
+            raise HTTPException(413, 'Files must be 20 MB or smaller') from error
         filename = Path((file.filename or 'attachment').replace('\\', '/')).name[:255] or 'attachment'
         attachment = Attachment(
             id=attachment_id,
@@ -168,6 +166,7 @@ def upload(note_id: str, file: UploadFile, session: Session = Depends(db), user:
             filename=filename,
             size=size,
             content_type=stored_content_type(filename, file.content_type),
+            object_key=object_key,
         )
         session.add(attachment)
         note.updated_at = now()
@@ -176,8 +175,10 @@ def upload(note_id: str, file: UploadFile, session: Session = Depends(db), user:
         return attachment
     except Exception:
         session.rollback()
-        quarantine_files([attachment_id])
-        try_reconcile_quarantine()
+        try:
+            storage.quarantine([object_key])
+        finally:
+            try_reconcile_quarantine()
         raise
     finally:
         file.file.close()
@@ -193,17 +194,27 @@ def download(
 ):
     get_note(session, note_id, user)
     item = session.get(Attachment, attachment_id)
-    path = STORAGE / item.id if item is not None else None
-    if item is None or item.note_id != note_id or path is None or not path.is_file():
+    if item is None or item.note_id != note_id:
         raise HTTPException(404, 'Attachment not found')
-    verified_type = verified_inline_content_type(path) if inline else None
+    object_key = item.object_key or item.id
+    try:
+        size = storage.size(object_key)
+        verified_type = verified_inline_content_type(storage.read(object_key)) if inline else None
+    except ObjectNotFound as error:
+        raise HTTPException(404, 'Attachment not found') from error
     is_safe_inline = verified_type is not None and verified_type == item.content_type
-    return FileResponse(
-        path,
-        filename=item.filename,
+    disposition = 'inline' if is_safe_inline else 'attachment'
+    encoded_filename = quote(item.filename)
+    if encoded_filename == item.filename:
+        content_disposition = f'{disposition}; filename="{item.filename}"'
+    else:
+        content_disposition = f"{disposition}; filename*=utf-8''{encoded_filename}"
+    return StreamingResponse(
+        storage.iter_chunks(object_key),
         media_type=verified_type if is_safe_inline else BINARY_CONTENT_TYPE,
-        content_disposition_type='inline' if is_safe_inline else 'attachment',
         headers={
+            'Content-Disposition': content_disposition,
+            'Content-Length': str(size),
             'X-Content-Type-Options': 'nosniff',
             'Cache-Control': 'no-store',
         },
@@ -217,7 +228,7 @@ def delete_attachment(note_id: str, attachment_id: str, session: Session = Depen
     item = session.get(Attachment, attachment_id)
     if item is None or item.note_id != note_id:
         raise HTTPException(404, 'Attachment not found')
-    quarantined = quarantine_files([item.id])
+    quarantined = storage.quarantine([item.object_key or item.id])
     try:
         session.delete(item)
         session.commit()
@@ -225,7 +236,7 @@ def delete_attachment(note_id: str, attachment_id: str, session: Session = Depen
         session.rollback()
         try_reconcile_quarantine()
         raise
-    discard_quarantined(quarantined)
+    storage.discard(quarantined)
 
 
 @action_items_router.patch('/{item_id}', response_model=ActionItemOut)

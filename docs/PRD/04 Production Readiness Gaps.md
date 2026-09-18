@@ -16,13 +16,13 @@ Unlike the feature roadmap, most of these aren't optional or sequenced by user v
 - **Would block launch entirely:** app-wide rate limiting, legal pages (blocks social login leaving test mode)
 - **Would erode trust once discovered:** session management UI
 
-The import audit corrected the baseline to 4 of 15 completed items: backend tests, health checks, CI/deploy code, and secrets management. Frontend automated tests and database migrations are now code-complete, bringing the repository total to 6 of 15. Remaining entries still distinguish repository implementation from any later live provider or production activation gate.
+The import audit corrected the baseline to 4 of 15 completed items: backend tests, health checks, CI/deploy code, and secrets management. Frontend automated tests, database migrations, and S3-compatible attachment storage are now code-complete, bringing the repository total to 7 of 15. Remaining entries still distinguish repository implementation from any later live provider or production activation gate.
 
 ## Items, in the original doc's section order
 
 1. ✅ [Backend automated tests](./04%20Production%20Readiness/01%20-%20done%20-%20Backend%20automated%20tests.md)
 2. ✅ [Frontend automated tests](./04%20Production%20Readiness/02%20-%20done%20-%20Frontend%20automated%20tests.md) — code-complete; Karma/Jasmine runs in real ChromeHeadless and blocks CI
-3. ⬜ [Object storage for attachments](./04%20Production%20Readiness/03%20Object%20storage%20for%20attachments.md) — partially mitigated by a Kubernetes PVC, but still local-disk, still caps the backend to one replica
+3. ✅ [Object storage for attachments](./04%20Production%20Readiness/03%20-%20done%20-%20Object%20storage%20for%20attachments.md) — code-complete with local/S3 backends and verified migration; live bucket, IAM, and cutover remain operator-gated
 4. ✅ [Database migrations (Alembic)](./04%20Production%20Readiness/04%20-%20done%20-%20Database%20migrations%20%28Alembic%29.md) — code-complete; validated adoption rejects unknown drift and preserves known ownerless legacy rows
 5. ⬜ [Structured logging](./04%20Production%20Readiness/05%20Structured%20logging.md)
 6. ⬜ [Error tracking (Sentry)](./04%20Production%20Readiness/06%20Error%20tracking%20%28Sentry%29.md)

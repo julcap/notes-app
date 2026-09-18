@@ -1,6 +1,5 @@
 import mimetypes
 import struct
-from pathlib import Path
 
 
 BINARY_CONTENT_TYPE = 'application/octet-stream'
@@ -22,12 +21,10 @@ def stored_content_type(filename: str, uploaded_content_type: str | None) -> str
     return candidate
 
 
-def verified_inline_content_type(path: Path) -> str | None:
-    size = path.stat().st_size
-    with path.open('rb') as source:
-        head = source.read(16)
-        source.seek(max(0, size - 1024))
-        tail = source.read()
+def verified_inline_content_type(content: bytes) -> str | None:
+    size = len(content)
+    head = content[:16]
+    tail = content[max(0, size - 1024):]
 
     if head.startswith(b'\x89PNG\r\n\x1a\n') and tail.endswith(b'IEND\xaeB`\x82'):
         return 'image/png'

@@ -9,7 +9,7 @@ from ..database import db, now
 from ..jobs import try_reconcile_quarantine
 from ..notes.models import MeetingShare, Note
 from ..notes.permissions import lock_account
-from ..storage import FILE_CLEANUP_LOCK_ID, discard_quarantined, quarantine_files
+from ..storage import FILE_CLEANUP_LOCK_ID, storage
 from . import totp
 from .config import APP_URL, SECURE
 from .email import deliver_email, email_link
@@ -18,6 +18,10 @@ from .router import router
 from .schemas import ChangePassword, DeleteAccount, EmailInput, Login, Login2FA, NotificationPreferences, ProfileUpdate, Registration, Reset, TokenInput, TotpCode, TotpDisable
 from .security import DUMMY_HASH, check_password, digest, limit, password_hash, same_origin
 from .tokens import access, consume, consume_mfa, cookie, current_user, issue, mfa_challenge, profile, refresh_row
+
+
+def quarantine_files(keys):
+    return storage.quarantine(keys)
 
 
 def verify_totp_or_backup_code(session, user, code):
@@ -235,8 +239,8 @@ def delete_account(data: DeleteAccount, request: Request, response: Response, us
         .with_for_update()
     ).all()
     notes = [note for note in locked_notes if note.owner_id == user.id]
-    attachment_ids = [a.id for n in notes for a in n.attachments]
-    quarantined = quarantine_files(attachment_ids)
+    object_keys = [a.object_key or a.id for n in notes for a in n.attachments]
+    quarantined = quarantine_files(object_keys)
     try:
         for note in notes:
             session.delete(note)
@@ -250,7 +254,7 @@ def delete_account(data: DeleteAccount, request: Request, response: Response, us
         session.rollback()
         try_reconcile_quarantine()
         raise
-    discard_quarantined(quarantined)
+    storage.discard(quarantined)
     response.delete_cookie('minutes_refresh', path='/api/auth', secure=SECURE, httponly=True, samesite='lax')
     response.delete_cookie('minutes_csrf', path='/', secure=SECURE, samesite='lax')
     return {'message': 'Your account and everything it owns have been deleted.'}
