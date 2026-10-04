@@ -14,6 +14,28 @@ WORKFLOW_PATH = ROOT / ".github" / "workflows" / "ci.yaml"
 class DeploymentPolicyTests(unittest.TestCase):
     maxDiff = None
 
+    def test_public_frontend_denies_metrics_and_backend_configuration_is_private(self):
+        nginx = (ROOT / "frontend" / "nginx.conf").read_text()
+        ingress = (ROOT / "deploy" / "ingress.yaml").read_text()
+        ingress_manifest = yaml.safe_load(ingress)
+        deployment = (ROOT / "deploy" / "app.yaml").read_text()
+        compose = (ROOT / "compose.yaml").read_text()
+        workflow = WORKFLOW_PATH.read_text()
+
+        self.assertIn("location = /metrics { access_log off; return 404; }", nginx)
+        self.assertIn("service: {name: frontend, port: {number: 80}}", ingress)
+        backend_paths = [
+            path["path"]
+            for path in ingress_manifest["spec"]["rules"][0]["http"]["paths"]
+            if path["backend"]["service"]["name"] == "backend"
+        ]
+        self.assertEqual(backend_paths, ["/api"])
+        self.assertIn("name: METRICS_ENABLED", deployment)
+        self.assertIn("key: metrics-token, optional: true", deployment)
+        self.assertIn("METRICS_ENABLED: ${METRICS_ENABLED:-false}", compose)
+        self.assertIn("METRICS_TOKEN: ${METRICS_TOKEN:-}", compose)
+        self.assertIn("METRICS_ENABLED: ${{ vars.METRICS_ENABLED || 'false' }}", workflow)
+
     def render(self, environment: str, storage_backend: str = "local") -> tuple[str, list[dict]]:
         namespace = f"minutes-{environment}"
         env = {

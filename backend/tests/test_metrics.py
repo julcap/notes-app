@@ -1,7 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 
-import yaml
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -10,30 +8,6 @@ from app.metrics import install_metrics
 
 
 METRICS_AUTH = {'Authorization': 'Bearer metrics-test-token'}
-REPOSITORY = Path(__file__).resolve().parents[2]
-
-
-def test_public_frontend_denies_metrics_and_backend_configuration_is_private():
-    nginx = (REPOSITORY / 'frontend/nginx.conf').read_text()
-    ingress = (REPOSITORY / 'deploy/ingress.yaml').read_text()
-    ingress_manifest = yaml.safe_load(ingress)
-    deployment = (REPOSITORY / 'deploy/app.yaml').read_text()
-    compose = (REPOSITORY / 'compose.yaml').read_text()
-    workflow = (REPOSITORY / '.github/workflows/ci.yaml').read_text()
-
-    assert 'location = /metrics { access_log off; return 404; }' in nginx
-    assert 'service: {name: frontend, port: {number: 80}}' in ingress
-    backend_paths = [
-        path['path']
-        for path in ingress_manifest['spec']['rules'][0]['http']['paths']
-        if path['backend']['service']['name'] == 'backend'
-    ]
-    assert backend_paths == ['/api']
-    assert 'name: METRICS_ENABLED' in deployment
-    assert 'key: metrics-token, optional: true' in deployment
-    assert 'METRICS_ENABLED: ${METRICS_ENABLED:-false}' in compose
-    assert 'METRICS_TOKEN: ${METRICS_TOKEN:-}' in compose
-    assert "METRICS_ENABLED: ${{ vars.METRICS_ENABLED || 'false' }}" in workflow
 
 
 def test_production_app_installs_disabled_metrics_endpoint():
